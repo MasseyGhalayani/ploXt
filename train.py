@@ -3,9 +3,11 @@ from mmdet.apis import train_detector, init_detector
 from mmdet.datasets import build_dataset
 
 # Set to `None` if training from Scratch
-CKPT = "original_ckpt.pth" 
+# CKPT = "original_ckpt.pth" 
+# CONFIG_PATH = "km_swin_t_config.py"
 
-CONFIG_PATH = "km_swin_t_config.py"
+CKPT = None
+CONFIG_PATH = "km_swin_t_v2_config.py"
 
 # Load the config file into a Config object
 cfg = Config.fromfile(CONFIG_PATH)

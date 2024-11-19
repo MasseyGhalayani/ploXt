@@ -162,3 +162,4 @@ cython_debug/
 # pytorch models
 *.pt
 *.pth
+.DS_Store
