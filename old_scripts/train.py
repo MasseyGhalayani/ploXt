@@ -4,7 +4,7 @@ from mmdet.datasets import build_dataset
 
 # Set to `None` if training from Scratch
 CKPT = "original_ckpt.pth" 
-CONFIG_PATH = "km_swin_t_config.py"
+CONFIG_PATH = "../model/km_swin_t_config.py"
 
 # CKPT = None
 # CONFIG_PATH = "km_swin_t_v2_config.py"

@@ -5,11 +5,12 @@ from skimage.morphology import skeletonize
 from scipy.interpolate import CubicSpline, interp1d
 import matplotlib.pyplot as plt
 from mmdet.apis import (inference_detector, init_detector)
+from model import line_utils
 
 # import sys
 # sys.path.append("/home/csgrad/jayashok/Mask2Former/")
-from clean_chart import get_clean_input
-import line_utils
+from model.clean_chart import get_clean_input
+
 
 import copy
 
@@ -188,11 +189,12 @@ def rescale_pred_ds(ds, transformation):
             pt['y'] = int((pt['y']-ty_padd) / sy) + ty_crop
     return ds
 
-def get_dataseries(img, annot=None, to_clean=False, post_proc=False, mask_kp_sample_interval=1, return_masks=False):
+def get_dataseries(img, annot=None, to_clean=False, post_proc=False, mask_kp_sample_interval=1, return_masks=False, interpolation_type='linear'):
     """
         img: chart image as numpy array (3 channel) 
         annot: json annot object in PMC format (required for cleaning the chart image before data extraction)
         mask_kp_sample_interval: interval to sample points from predicted line mask to get data series
+        interpolation_type: type of interpolation ('linear', 'cubic_spline', or None). If None, returns raw keypoints.
         returns data series in pmc task 6a format ('visual elements') => list of lines, each a list of {x:, y: } points w.r.t original image
     """
     global model
@@ -229,8 +231,9 @@ def get_dataseries(img, annot=None, to_clean=False, post_proc=False, mask_kp_sam
         x_range = line_utils.get_xrange(line_mask)
         line_ds = line_utils.get_kp(line_mask, interval=mask_kp_sample_interval, x_range=x_range, get_num_lines=False, get_center=True)
         
-        line_ds = interpolate(line_ds, inter_type='linear')
-
+        if interpolation_type:
+            line_ds = interpolate(line_ds, inter_type=interpolation_type)
+ 
         pred_ds.append(line_ds)
 
     # Reverse that transformation on pred-ds

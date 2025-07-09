@@ -1,10 +1,10 @@
 import cv2 
 import pandas as pd
 
-import post_process_prediction.post_process_groups as post_process_groups
-import post_process_prediction.post_process_utils as post_process_utils
-import post_process_prediction.post_process_debug_draw as post_process_debug_draw
-from post_process_prediction.coordinates_to_data import get_kaplan_meier_data_from_events, map_px_to_plot_coordinates
+import old_scripts.post_process_prediction.post_process_groups as post_process_groups
+import old_scripts.post_process_prediction.post_process_utils as post_process_utils
+import old_scripts.post_process_prediction.post_process_debug_draw as post_process_debug_draw
+from old_scripts.post_process_prediction.coordinates_to_data import get_kaplan_meier_data_from_events, map_px_to_plot_coordinates
 
                 
 def extract_event_px_coordinates(binary_mask):
