@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from model import infer
 import pandas as pd
 import cv2
@@ -5,10 +7,11 @@ from ultralytics import YOLO
 import easyocr
 import matplotlib.pyplot as plt
 
+script_dir = Path(__file__).parent.resolve()
 # --- Configuration ---
-CKPT = "iter_3000.pth"
-CONFIG = "km_swin_t_config.py"
-DEVICE = "cuda"
+CKPT = script_dir / "iter_3000.pth"
+CONFIG = script_dir / "km_swin_t_config.py"
+DEVICE = 'cuda'
 
 # --- Initialize the OCR reader once at the start ---
 print("Initializing EasyOCR reader... (This may take a moment on first run)")
@@ -27,7 +30,7 @@ def run_line_finder(img):
 def run_plot_detector(img_path):
     """Runs the YOLO object detection model to find plot components."""
     print("\n--- Running YOLO Plot Info Detector ---")
-    model = YOLO("../model/yoloPlotInfoDetector.pt")
+    model = YOLO("yoloPlotInfoDetector.pt")
     results = model(img_path)
     print(f"Detected {len(results[0].boxes)} objects.")
     return results[0]
@@ -241,7 +244,7 @@ def extract_data_from_plot(line_dataseries, yolo_results, full_image, reader, de
 if __name__ == '__main__':
     infer.load_model(CONFIG, CKPT, DEVICE)
 
-    img_path = "../demo/Graph.png"
+    img_path = "../demo/PMC5959982___3_HTML.jpg"
     img = cv2.imread(img_path)
 
     # --- STAGE 1: Find Lines (in pixels) ---
@@ -251,7 +254,7 @@ if __name__ == '__main__':
     yolo_results = run_plot_detector(img_path)
 
     # --- STAGE 3: Combine and Translate ---
-    extraction_result = extract_data_from_plot(line_dataseries, yolo_results, img, ocr_reader, debug_ocr=False)
+    extraction_result = extract_data_from_plot(line_dataseries, yolo_results, img, ocr_reader, debug_ocr=True)
 
     # --- STAGE 4: Display Results ---
     if extraction_result:
