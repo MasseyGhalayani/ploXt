@@ -25,7 +25,7 @@ class InteractiveImageViewer(QLabel):
 
         # Zoom and Adaptive Brush
         self.zoom_levels = [60, 50, 40, 30, 20, 15, 10]
-        self.brush_sizes = [30, 25, 20, 15, 10, 8, 5]
+        self.brush_sizes = [20, 15, 10, 7, 5, 3, 2]
         self.current_zoom_index = 3
 
         # Tool State
