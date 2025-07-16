@@ -12,10 +12,12 @@ from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
 from model.chart_extractor import ChartExtractor
+from model.pdf_chart_extractor import PdfChartExtractor
 from model.post_processor import PostProcessor
 from .interactive_image_viewer import InteractiveImageViewer
 from .gui_widgets import (SeriesEditorWidget, OcrDebugWidget, InteractivePlotCanvas, 
                           CorrectionTab, PostProcessingTab, SaveTab, ResultsTab)
+from .chart_selection_dialog import ChartSelectionDialog
 
 # Try to import scipy for .mat export, handle if not found
 try:
@@ -42,6 +44,21 @@ class Worker(QThread):
         self.finished.emit(result)
 
 
+class PdfWorker(QThread):
+    """Worker thread for extracting charts from a PDF."""
+    finished = pyqtSignal(list)
+
+    def __init__(self, pdf_extractor, pdf_path):
+        super().__init__()
+        self.pdf_extractor = pdf_extractor
+        self.pdf_path = pdf_path
+
+    def run(self):
+        # This can be a long process
+        extracted_charts = self.pdf_extractor.extract_charts_from_pdf(self.pdf_path)
+        self.finished.emit(extracted_charts)
+
+
 class MainAppWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -49,12 +66,14 @@ class MainAppWindow(QMainWindow):
         self.setGeometry(100, 100, 1600, 900)
         self.extractor = None
         self.current_results = None
+        self.pdf_extractor = None # New extractor instance
         self.series_widgets = []
         self.ocr_debug_widgets = []
         self.processed_results = None
         self.ocr_target_widget = None
         self.best_ocr_params = {}
         self.mask_overlay_pixmap = None # Cache for the overlay
+        self.chart_selection_dialog = None # To hold reference to the dialog
 
         # --- NEW: Define a shared color palette for masks and plots ---
         self.SERIES_COLORS = [
@@ -166,6 +185,10 @@ class MainAppWindow(QMainWindow):
         self.load_action = QAction(style.standardIcon(style.SP_DirOpenIcon), "Open Image", self)
         self.load_action.triggered.connect(self.load_image)
         toolbar.addAction(self.load_action)
+
+        self.load_pdf_action = QAction(style.standardIcon(style.SP_FileIcon), "Open PDF", self)
+        self.load_pdf_action.triggered.connect(self.load_pdf)
+        toolbar.addAction(self.load_pdf_action)
 
         toolbar.addSeparator()
 
@@ -316,7 +339,9 @@ class MainAppWindow(QMainWindow):
 
     def init_models(self):
         self.statusBar().showMessage("Loading models... Please wait.")
+        # --- NEW: Initialize both extractors ---
         self.extractor = ChartExtractor()
+        self.pdf_extractor = PdfChartExtractor()
         self.statusBar().showMessage("Models loaded successfully.", 5000)
 
     def load_image(self):
@@ -328,6 +353,42 @@ class MainAppWindow(QMainWindow):
             self.clear_results(clear_image_viewer_state=False)
             # Reset cached OCR params for a new image to force re-tuning.
             self.best_ocr_params = {}
+
+    def load_pdf(self):
+        """Opens a PDF and starts a worker to extract chart images."""
+        path, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
+        if path:
+            self.statusBar().showMessage("Processing PDF to find charts... This may take a while.", 0)
+            # Disable buttons to prevent user interaction during processing
+            self.load_action.setEnabled(False)
+            self.load_pdf_action.setEnabled(False)
+            self.run_btn.setEnabled(False)
+
+            self.pdf_worker = PdfWorker(self.pdf_extractor, path)
+            self.pdf_worker.finished.connect(self.on_pdf_processing_complete)
+            self.pdf_worker.start()
+
+    def on_pdf_processing_complete(self, chart_images):
+        """
+        Receives extracted charts from the PDF worker and opens the selection dialog.
+        """
+        # Re-enable buttons
+        self.load_action.setEnabled(True)
+        self.load_pdf_action.setEnabled(True)
+        self.statusBar().clearMessage()
+
+        self.chart_selection_dialog = ChartSelectionDialog(chart_images, self)
+        self.chart_selection_dialog.chartSelected.connect(self.load_selected_chart_from_dialog)
+        self.chart_selection_dialog.show()
+
+    def load_selected_chart_from_dialog(self, pixmap):
+        """This slot receives the selected chart from the dialog and loads it."""
+        if pixmap and not pixmap.isNull():
+            self.image_viewer.set_image(pixmap)
+            self.clear_results(clear_image_viewer_state=False)
+            self.run_btn.setEnabled(True)
+            self.best_ocr_params = {} # Reset for new image
+            self.statusBar().showMessage("Selected chart loaded. You can now run inference.", 5000)
 
     def run_inference(self):
         if self.image_viewer.editable_pixmap is None: return
