@@ -23,9 +23,7 @@ if %errorlevel% neq 0 (
 echo Activating virtual environment...
 call venv\Scripts\activate.bat
 
-:: --- 3. Upgrade Pip ---
-echo Upgrading pip...
-python -m pip install --upgrade pip
+
 
 :: --- 4. Install Core Deep Learning Libraries ---
 echo.

@@ -7,11 +7,14 @@
 #    This command is for CUDA 11.7.
 conda install pytorch==1.13.1 torchvision==0.14.1 pytorch-cuda=11.7 -c pytorch -c nvidia
 
+
+# 3. Install MMDetection in editable mode.
+#    This assumes the 'mmdetection' directory is in the project root.
+pip install -e mmdetection
+
+
 # 2. Install all other packages from the consolidated requirements file.
 #    `openmim` is listed in requirements.txt and will be used by `pip`
 #    to correctly install `mmcv-full`.
 pip install -r requirements.txt
 
-# 3. Install MMDetection in editable mode.
-#    This assumes the 'mmdetection' directory is in the project root.
-pip install -e mmdetection
