@@ -1,7 +1,7 @@
 @echo off
 :: This script sets up a Python virtual environment for the project
 :: and installs all necessary dependencies.
-:: It is designed for Windows with an NVIDIA GPU and CUDA 11.7 already installed.
+:: It is designed for Windows with an NVIDIA GPU and CUDA 11.7 already installed. tested for Python 3.9.23
 
 echo.
 echo =================================================
@@ -52,17 +52,7 @@ if %errorlevel% neq 0 (
     goto :error
 )
 
-:: --- 5. Install Remaining Dependencies ---
-echo.
-echo Installing other dependencies from requirements.txt...
-pip install -r requirements.txt
-if %errorlevel% neq 0 (
-    echo.
-    echo ERROR: Failed to install packages from requirements.txt.
-    goto :error
-)
-
-:: --- 6. Install MMDetection (Editable) ---
+:: --- 5. Install MMDetection (Editable) ---
 if exist "mmdetection\" (
     echo.
     echo Installing mmdetection in editable mode...
@@ -72,6 +62,19 @@ if exist "mmdetection\" (
     echo WARNING: 'mmdetection' directory not found. Skipping editable install.
     echo The line segmentation model may not work.
 )
+
+
+
+:: --- 6. Install Remaining Dependencies ---
+echo.
+echo Installing other dependencies from requirements.txt...
+pip install -r requirements.txt
+if %errorlevel% neq 0 (
+    echo.
+    echo ERROR: Failed to install packages from requirements.txt.
+    goto :error
+)
+
 
 echo.
 echo.
