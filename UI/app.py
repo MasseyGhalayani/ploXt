@@ -30,13 +30,15 @@ class Worker(QThread):
     """Worker thread for running heavy model inference."""
     finished = pyqtSignal(dict)
 
-    def __init__(self, extractor, image_data):
+    def __init__(self, extractor, image_data, ocr_params=None):
         super().__init__()
         self.extractor = extractor
         self.image_data = image_data
+        self.ocr_params = ocr_params
 
     def run(self):
-        result = self.extractor.process_image(self.image_data)
+        # Pass cached ocr_params if they exist to skip auto-tuning
+        result = self.extractor.process_image(self.image_data, ocr_params=self.ocr_params)
         self.finished.emit(result)
 
 
@@ -324,6 +326,8 @@ class MainAppWindow(QMainWindow):
             self.image_viewer.set_image(pixmap)
             self.run_btn.setEnabled(True)
             self.clear_results(clear_image_viewer_state=False)
+            # Reset cached OCR params for a new image to force re-tuning.
+            self.best_ocr_params = {}
 
     def run_inference(self):
         if self.image_viewer.editable_pixmap is None: return
@@ -338,7 +342,8 @@ class MainAppWindow(QMainWindow):
             self.run_btn.setEnabled(True)
             return
 
-        self.worker = Worker(self.extractor, edited_image_np)
+        # Pass cached OCR params to the worker to skip auto-tuning on re-runs
+        self.worker = Worker(self.extractor, edited_image_np, ocr_params=self.best_ocr_params)
         self.worker.finished.connect(self.on_inference_complete)
         self.worker.start()
 
@@ -363,6 +368,12 @@ class MainAppWindow(QMainWindow):
             self.mask_overlay_pixmap = None # Clear cached overlay
             # --- NEW: Save best OCR params for later use ---
             self.best_ocr_params = result.get('ocr_data', {}).get('best_params_found', {})
+
+            # --- NEW: Display the found best params in the OCR debug tab ---
+            if self.best_ocr_params:
+                self.ocr_scale_spinbox.setValue(self.best_ocr_params.get('scale_factor', 2.0))
+                self.ocr_blur_spinbox.setValue(self.best_ocr_params.get('blur_ksize', 5))
+                self.ocr_margin_spinbox.setValue(self.best_ocr_params.get('margin', 2))
 
             self.populate_correction_fields(result)
             self._update_postproc_combo_box() # Centralized update
@@ -570,10 +581,13 @@ class MainAppWindow(QMainWindow):
         # 1. Gather parameters from the UI
         params = self._get_postprocessing_params()
 
-        # 2. Get the data to process from the original corrected data
+        # 2. Get the data to process from the LATEST data (processed or original)
+        # --- MODIFIED: Use the latest processed data as the source for applying changes. ---
+        # This makes the "Apply" operation cumulative, matching the preview's behavior.
+        source_data_for_apply = self.processed_results if self.processed_results else self.current_results
         selected_series_name = self.postprocessing_tab.postproc_series_combo.currentText()
 
-        active_series = [s for s in self.current_results['series_data'] if not s.get('is_deleted', False)]
+        active_series = [s for s in source_data_for_apply['series_data'] if not s.get('is_deleted', False)]
 
         if selected_series_name == "All Series":
             series_to_process = active_series
@@ -641,11 +655,31 @@ class MainAppWindow(QMainWindow):
         selected_series_name = self.postprocessing_tab.postproc_series_combo.currentText()
         params = self._get_postprocessing_params()
 
-        # Determine the source series from the original corrected data
+        # --- FIX: If all post-processing is disabled, show the last committed state ---
+        # The user expects the plot to retain the processed data unless they explicitly
+        # reset it. Re-running a "preview" with no filters active would misleadingly
+        # show the original data. Instead, we call _display_current_postproc_state,
+        # which correctly shows self.processed_results if it exists.
+        is_any_processing_enabled = (
+            params.get('outlier_removal_enabled') or
+            params.get('auto_resampling_enabled') or
+            params.get('manual_editing_enabled')
+        )
+
+        if not is_any_processing_enabled:
+            self._display_current_postproc_state()
+            return
+
+        # --- MODIFIED: Use the latest processed data as the source for previews ---
+        # This allows for chaining post-processing effects. If no post-processing has been
+        # applied yet, it falls back to the original corrected data.
+        source_data = self.processed_results if self.processed_results else self.current_results
+
+        # Determine the source series from the chosen data source
         if selected_series_name == "All Series":
-            source_series_list = self.current_results.get('series_data', [])
+            source_series_list = source_data.get('series_data', [])
         else:
-            source_series = next((s for s in self.current_results['series_data'] if s['series_name'] == selected_series_name), None)
+            source_series = next((s for s in source_data.get('series_data', []) if s['series_name'] == selected_series_name), None)
             source_series_list = [source_series] if source_series else []
 
         if not source_series_list:

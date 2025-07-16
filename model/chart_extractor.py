@@ -388,10 +388,11 @@ class ChartExtractor:
         plot_img_pil = Image.open(buf)
         return cv2.cvtColor(np.array(plot_img_pil), cv2.COLOR_RGBA2BGRA)
 
-    def process_image(self, image_or_path, debug_ocr=False):
+    def process_image(self, image_or_path, debug_ocr=False, ocr_params=None):
         """
         The main public method to run the full extraction pipeline on a single image.
         --- MODIFIED: Now returns intermediate results even if final calculation fails. ---
+        --- MODIFIED: Accepts optional ocr_params to skip auto-tuning. ---
         """
         try:
             if isinstance(image_or_path, (str, Path)):
@@ -405,8 +406,15 @@ class ChartExtractor:
 
             raw_keypoints, inst_masks = self._run_line_finder(img)
             yolo_results = self._run_plot_detector(img_path if img_path else img)
-            # --- NEW: Auto-tune OCR parameters before final extraction ---
-            best_ocr_params = self._find_best_ocr_params(yolo_results, img)
+            
+            # --- MODIFIED: Use provided OCR params if available, otherwise find them ---
+            if ocr_params:
+                print("--- Using provided OCR parameters, skipping auto-tuning ---")
+                best_ocr_params = ocr_params
+            else:
+                # Auto-tune OCR parameters before final extraction
+                best_ocr_params = self._find_best_ocr_params(yolo_results, img)
+
             ocr_data = self._extract_ocr_data(yolo_results, img, ocr_params=best_ocr_params, debug_ocr=debug_ocr)
             ocr_data['best_params_found'] = best_ocr_params
 
