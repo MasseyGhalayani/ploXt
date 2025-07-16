@@ -242,8 +242,14 @@ class InteractivePlotCanvas(FigureCanvas):
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_motion)
         self.fig.canvas.mpl_connect('button_release_event', self.on_release)
 
-    def update_plot(self, processed_series, colors, original_series=None, interactive_mode=False):
+    def update_plot(self, processed_series, colors, original_series=None, interactive_mode=False,
+                    x_scale='linear', y_scale='linear'):
         self.axes.clear()
+
+        # --- NEW: Set axis scales before plotting ---
+        self.axes.set_xscale(x_scale)
+        self.axes.set_yscale(y_scale)
+
         # The state of interactive_points is managed externally by the main app logic.
         # This method should only draw the current state, not modify it.
         self.line = None
@@ -301,8 +307,8 @@ class InteractivePlotCanvas(FigureCanvas):
 
         # Final plot styling
         self.axes.minorticks_on()
-        self.axes.grid(which='major', linestyle='-', linewidth='0.5', color='gray')
-        self.axes.grid(which='minor', linestyle=':', linewidth='0.5', color='lightgray')
+        # Use which='both' to handle grid lines correctly for linear and log scales
+        self.axes.grid(True, which='both', linestyle='--', linewidth='0.5')
         if self.axes.get_legend_handles_labels()[1]:
             self.axes.legend()
         self.fig.tight_layout()
@@ -450,18 +456,27 @@ class PostProcessingTab(QWidget):
         self.outlier_group = QGroupBox("Outlier Removal (Local Regression)")
         self.outlier_group.setToolTip("Removes data points that deviate significantly from their neighbors. Disabled during manual editing.")
         outlier_form_layout = QFormLayout(self.outlier_group)
+        
         self.outlier_enabled_check = QCheckBox("Enable")
+
+        self.outlier_method_combo = QComboBox()
+        self.outlier_method_combo.addItems(["Local Regression", "RANSAC"])
+        self.outlier_method_combo.setToolTip("Local Regression is good for general noise. RANSAC is better for charts with significant, large outliers.")
+
         self.outlier_window_spin = QDoubleSpinBox()
         self.outlier_window_spin.setRange(0.05, 0.5)
         self.outlier_window_spin.setValue(0.15)
         self.outlier_window_spin.setSingleStep(0.01)
         self.outlier_window_spin.setDecimals(2)
+        self.outlier_window_label = QLabel("Window Fraction:") # Label to toggle
+
         self.outlier_threshold_spin = QDoubleSpinBox()
         self.outlier_threshold_spin.setRange(1.0, 10.0)
         self.outlier_threshold_spin.setValue(3.0)
         self.outlier_threshold_spin.setSingleStep(0.1)
         outlier_form_layout.addRow(self.outlier_enabled_check)
-        outlier_form_layout.addRow("Window Fraction:", self.outlier_window_spin)
+        outlier_form_layout.addRow("Method:", self.outlier_method_combo)
+        outlier_form_layout.addRow(self.outlier_window_label, self.outlier_window_spin)
         outlier_form_layout.addRow("Threshold (Std Dev):", self.outlier_threshold_spin)
         filter_layout.addRow(self.outlier_group)
 
@@ -474,7 +489,7 @@ class PostProcessingTab(QWidget):
         self.auto_resample_points_spin.setRange(3, 1000)
         self.auto_resample_points_spin.setValue(100)
         self.auto_resample_method_combo = QComboBox()
-        self.auto_resample_method_combo.addItems(["Linear", "Cubic Spline"])
+        self.auto_resample_method_combo.addItems(["Linear", "Cubic Spline", "Savitzky-Golay"])
         auto_resampling_form_layout.addRow(self.auto_resampling_enabled_check)
         auto_resampling_form_layout.addRow("Number of Points:", self.auto_resample_points_spin)
         auto_resampling_form_layout.addRow("Method:", self.auto_resample_method_combo)
@@ -493,7 +508,7 @@ class PostProcessingTab(QWidget):
         self.manual_final_points_spin.setRange(10, 2000)
         self.manual_final_points_spin.setValue(100)
         self.manual_interp_method_combo = QComboBox()
-        self.manual_interp_method_combo.addItems(["Linear", "Cubic Spline"])
+        self.manual_interp_method_combo.addItems(["Linear", "Cubic Spline", "Savitzky-Golay"])
         manual_editing_form_layout.addRow(self.manual_editing_enabled_check)
         manual_editing_form_layout.addRow("Num. Reference Points:", self.manual_ref_points_spin)
         manual_editing_form_layout.addRow(self.manual_init_reset_btn)

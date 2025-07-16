@@ -62,7 +62,7 @@ class PdfWorker(QThread):
 class MainAppWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Professional Chart Data Extractor")
+        self.setWindowTitle("Chart Data Extractor Ver 1.0")
         self.setGeometry(100, 100, 1600, 900)
         self.extractor = None
         self.current_results = None
@@ -150,6 +150,7 @@ class MainAppWindow(QMainWindow):
         # --- Connect post-processing controls to their handlers ---
         # Outlier controls
         self.postprocessing_tab.outlier_enabled_check.toggled.connect(self.toggle_outlier_controls)
+        self.postprocessing_tab.outlier_method_combo.currentTextChanged.connect(self.handle_outlier_method_change)
         self.postprocessing_tab.outlier_window_spin.valueChanged.connect(self._run_postprocessing_preview)
         self.postprocessing_tab.outlier_threshold_spin.valueChanged.connect(self._run_postprocessing_preview)
         # Auto-resampling controls
@@ -234,7 +235,7 @@ class MainAppWindow(QMainWindow):
         # Determine the final data to be displayed and saved
         final_data_source = self.processed_results if self.processed_results else self.current_results
 
-        if not final_data_source or not final_data_source.get('series_data'):
+        if not final_data_source or not [s for s in final_data_source.get('series_data', []) if not s.get('is_deleted', False)]:
             # Clear all views if there is no data
             self.results_tab.plot_label.setText("Recreated plot will appear here.")
             self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS)
@@ -443,8 +444,8 @@ class MainAppWindow(QMainWindow):
             self.show_masks_action.setEnabled(True)
             self.postprocessing_tab.reset_all_btn.setEnabled(False) # Disabled until first processing
             self.postprocessing_tab.apply_postprocessing_btn.setEnabled(True)
-            # The plot is initially empty until the user interacts with the controls.
-            self.postprocessing_tab.postproc_canvas.update_plot([], [])
+            # Clear the plot with default linear scale until user interacts.
+            self.postprocessing_tab.postproc_canvas.update_plot([], [], x_scale='linear', y_scale='linear')
         else:
             # On failure, the OCR debug tab is still populated, so we just show the error.
             QMessageBox.critical(self, "Inference Error", result['message'])
@@ -542,77 +543,135 @@ class MainAppWindow(QMainWindow):
                 self.ocr_debug_layout.addWidget(widget)
                 self.ocr_debug_widgets.append(widget)
 
-    def apply_all_corrections(self):
+    def apply_all_corrections(self): # --- ENTIRELY REWRITTEN ---
+        """
+        Applies corrections from the UI. It intelligently determines if a full
+        data recalculation is needed (if ticks changed) or if only a metadata
+        update is required (if only titles changed).
+        """
         if not self.current_results: return
 
+        # --- 1. Read all corrected values from UI and check for changes ---
+        current_ocr_data = self.current_results.get('ocr_data', {})
+
+        def to_float_or_nan(s):
+            try: return float(s)
+            except (ValueError, TypeError): return np.nan
+
+        new_x_tick_values = [to_float_or_nan(self.correction_tab.x_ticks_table.item(i, 2).text()) for i in range(self.correction_tab.x_ticks_table.rowCount())]
+        new_y_tick_values = [to_float_or_nan(self.correction_tab.y_ticks_table.item(i, 2).text()) for i in range(self.correction_tab.y_ticks_table.rowCount())]
+
+        old_x_tick_values = [t['value'] for t in current_ocr_data.get('ticks', []) if t.get('axis') == 'x']
+        old_y_tick_values = [t['value'] for t in current_ocr_data.get('ticks', []) if t.get('axis') == 'y']
+
+        # Compare tick values to see if a full recalculation is needed.
+        ticks_changed = True
+        if len(new_x_tick_values) == len(old_x_tick_values) and len(new_y_tick_values) == len(old_y_tick_values):
+            if np.allclose(new_x_tick_values, old_x_tick_values, equal_nan=True) and \
+               np.allclose(new_y_tick_values, old_y_tick_values, equal_nan=True):
+                ticks_changed = False
+
+        corrected_plot_title = self.correction_tab.plot_title_edit.text()
+        corrected_x_title = self.correction_tab.x_title_edit.text()
+        corrected_y_title = self.correction_tab.y_title_edit.text()
+
+        titles_changed = (corrected_plot_title != current_ocr_data.get('plot_title', {}).get('text', '') or
+                          corrected_x_title != current_ocr_data.get('x_axis_title', {}).get('text', '') or
+                          corrected_y_title != current_ocr_data.get('y_axis_title', {}).get('text', ''))
+
+        # --- 2. Decide on update path ---
+        if not ticks_changed:
+            # --- PATH A: Metadata-only update. No data recalculation needed. ---
+            if not titles_changed:
+                self.statusBar().showMessage("No changes to apply.", 3000)
+                return
+
+            print("--- Applying metadata-only corrections (titles) ---")
+            # Update titles on both current and processed results
+            for result_set in [self.current_results, self.processed_results]:
+                if result_set:
+                    result_set['plot_title'] = corrected_plot_title
+                    result_set['x_axis_title'] = corrected_x_title
+                    result_set['y_axis_title'] = corrected_y_title
+
+            # Update the underlying OCR data as well for consistency
+            self.current_results['ocr_data']['plot_title']['text'] = corrected_plot_title
+            self.current_results['ocr_data']['x_axis_title']['text'] = corrected_x_title
+            self.current_results['ocr_data']['y_axis_title']['text'] = corrected_y_title
+
+            self._update_all_views()
+            self.statusBar().showMessage("Chart titles updated successfully.", 5000)
+            return
+
+        # --- PATH B: Ticks changed. Full data recalculation is required. ---
+        print("--- Tick values changed, performing full recalculation ---")
+        if self.processed_results:
+            reply = QMessageBox.question(self, "Confirm Recalculation",
+                                         "Changing axis tick values requires re-calculating all data points from scratch. "
+                                         "This will discard any changes made in the 'Post-processing' tab.\n\n"
+                                         "Do you want to continue?",
+                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.No:
+                return
+
+        # Proceed with full recalculation
         corrected_ocr = self.current_results['ocr_data']
-        corrected_ocr['plot_title']['text'] = self.correction_tab.plot_title_edit.text()
-        corrected_ocr['x_axis_title']['text'] = self.correction_tab.x_title_edit.text()
-        corrected_ocr['y_axis_title']['text'] = self.correction_tab.y_title_edit.text()
+        corrected_ocr['plot_title']['text'] = corrected_plot_title
+        corrected_ocr['x_axis_title']['text'] = corrected_x_title
+        corrected_ocr['y_axis_title']['text'] = corrected_y_title
 
+        # Update the tick values in the state with the new ones from the UI
         x_ticks_in_state = [t for t in corrected_ocr['ticks'] if t.get('axis') == 'x']
+        for i, tick_widget_value in enumerate(new_x_tick_values):
+            if i < len(x_ticks_in_state) and not np.isnan(tick_widget_value):
+                x_ticks_in_state[i]['value'] = tick_widget_value
+
         y_ticks_in_state = [t for t in corrected_ocr['ticks'] if t.get('axis') == 'y']
-
-        for i in range(self.correction_tab.x_ticks_table.rowCount()):
-            try:
-                if i < len(x_ticks_in_state):
-                    x_ticks_in_state[i]['value'] = float(self.correction_tab.x_ticks_table.item(i, 2).text())
-            except (ValueError, IndexError):
-                pass
-
-        for i in range(self.correction_tab.y_ticks_table.rowCount()):
-            try:
-                if i < len(y_ticks_in_state):
-                    y_ticks_in_state[i]['value'] = float(self.correction_tab.y_ticks_table.item(i, 2).text())
-            except (ValueError, IndexError):
-                pass
+        for i, tick_widget_value in enumerate(new_y_tick_values):
+            if i < len(y_ticks_in_state) and not np.isnan(tick_widget_value):
+                y_ticks_in_state[i]['value'] = tick_widget_value
 
         inter_text = self.correction_tab.interpolation_combo.currentText()
-        inter_map = {
-            "Linear": "linear",
-            "Cubic Spline": "cubic_spline",
-            "None (Raw Points)": "none"
-        }
+        inter_map = {"Linear": "linear", "Cubic Spline": "cubic_spline", "None (Raw Points)": "none"}
         interpolation_method = inter_map.get(inter_text, 'linear')
 
-        lines_to_process, new_names = [], []
-        for widget in self.series_widgets:
-            if not widget.is_deleted:
-                # FIX: Pass a tuple of (original_index, keypoints)
-                lines_to_process.append((widget.original_index, self.current_results['raw_keypoints'][widget.original_index]))
-                new_names.append(widget.get_series_name())
+        lines_to_process = [(w.original_index, self.current_results['raw_keypoints'][w.original_index])
+                            for w in self.series_widgets if not w.is_deleted]
 
         recalculated = self.extractor.recalculate_from_corrected(
             lines_to_process, corrected_ocr, interpolation_method=interpolation_method
         )
 
         if recalculated['status'] == 'success':
-            # Update the names in the recalculated data before merging
+            was_processed = self.processed_results is not None
+            if was_processed:
+                self.processed_results = None
+
             for series in recalculated['series_data']:
-                original_index = series.get('original_index')
-                for widget in self.series_widgets:
-                    if widget.original_index == original_index:
-                        series['series_name'] = widget.get_series_name()
-                        break
+                widget = next((w for w in self.series_widgets if w.original_index == series['original_index']), None)
+                if widget:
+                    series['series_name'] = widget.get_series_name()
 
-            # Now, merge the updated data back into the main state
             recalculated_map = {s['original_index']: s for s in recalculated['series_data']}
+            for s in self.current_results['series_data']:
+                if s['original_index'] in recalculated_map:
+                    s['data_points'] = recalculated_map[s['original_index']]['data_points']
+                    s['series_name'] = recalculated_map[s['original_index']]['series_name']
 
-            for series in self.current_results['series_data']:
-                idx = series.get('original_index')
-                if idx in recalculated_map:
-                    series['data_points'] = recalculated_map[idx]['data_points']
-                    series['series_name'] = recalculated_map[idx]['series_name']
-            
             self.current_results['dataframes'] = [pd.DataFrame(s['data_points']) for s in self.current_results['series_data']]
             self.current_results['plot_title'] = recalculated.get('plot_title')
             self.current_results['x_axis_title'] = recalculated.get('x_axis_title')
             self.current_results['y_axis_title'] = recalculated.get('y_axis_title')
+            self.current_results['x_scale_type'] = recalculated.get('x_scale_type')
+            self.current_results['y_scale_type'] = recalculated.get('y_scale_type')
             self.current_results['ocr_data'] = corrected_ocr
 
             self._update_postproc_combo_box()
             self._update_all_views()
-            self.statusBar().showMessage("Recalculated with all corrections.", 5000)
+            if was_processed:
+                self.statusBar().showMessage("Recalculated with corrections. Post-processing has been reset.", 6000)
+            else:
+                self.statusBar().showMessage("Recalculated with all corrections.", 5000)
         else:
             QMessageBox.warning(self, "Recalculation Error", recalculated['message'])
 
@@ -642,6 +701,7 @@ class MainAppWindow(QMainWindow):
         # 1. Gather parameters from the UI
         params = self._get_postprocessing_params()
 
+
         # 2. Get the data to process from the LATEST data (processed or original)
         # --- MODIFIED: Use the latest processed data as the source for applying changes. ---
         # This makes the "Apply" operation cumulative, matching the preview's behavior.
@@ -664,7 +724,14 @@ class MainAppWindow(QMainWindow):
         if selected_series_name != "All Series" and params.get('manual_editing_enabled', False):
             override_points = self.postprocessing_tab.postproc_canvas.interactive_points
 
-        processed_chunk = PostProcessor.process(copy.deepcopy(series_to_process), params, override_points=override_points)
+        # --- NEW: Get scale types from the source data ---
+        x_scale = source_data_for_apply.get('x_scale_type', 'linear')
+        y_scale = source_data_for_apply.get('y_scale_type', 'linear')
+        outlier_method = self._get_postprocessing_params().get('outlier_method')
+
+        processed_chunk = PostProcessor.process(copy.deepcopy(series_to_process), params,
+                                                override_points=override_points,
+                                                x_scale=x_scale, y_scale=y_scale, outlier_method=outlier_method)
 
         # --- NEW: If manual editing was used, store the reference points for state persistence ---
         if override_points is not None:
@@ -694,6 +761,7 @@ class MainAppWindow(QMainWindow):
         """Helper function to gather all post-processing parameters from the UI."""
         return {
             'outlier_removal_enabled': self.postprocessing_tab.outlier_enabled_check.isChecked(),
+            'outlier_method': self.postprocessing_tab.outlier_method_combo.currentText().lower().replace(' ', '_'),
             'outlier_window_fraction': self.postprocessing_tab.outlier_window_spin.value(),
             'outlier_threshold': self.postprocessing_tab.outlier_threshold_spin.value(),
 
@@ -708,13 +776,19 @@ class MainAppWindow(QMainWindow):
 
     def _run_postprocessing_preview(self):
         """Shows a live preview of post-processing without committing the changes."""
-        if not self.current_results or not self.current_results.get('series_data'):
-            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS)
+        # Use the latest data available as the source for scales and series
+        source_data = self.processed_results if self.processed_results else self.current_results
+
+        if not source_data or not source_data.get('series_data'):
+            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, x_scale='linear', y_scale='linear')
             return
 
-        # This function can be called by any control change, so we always get the latest state
+        # Get latest parameters and scale types
         selected_series_name = self.postprocessing_tab.postproc_series_combo.currentText()
         params = self._get_postprocessing_params()
+        x_scale = source_data.get('x_scale_type', 'linear')
+        y_scale = source_data.get('y_scale_type', 'linear')
+        outlier_method = params.get('outlier_method')
 
         # --- FIX: If all post-processing is disabled, show the last committed state ---
         # The user expects the plot to retain the processed data unless they explicitly
@@ -734,7 +808,6 @@ class MainAppWindow(QMainWindow):
         # --- MODIFIED: Use the latest processed data as the source for previews ---
         # This allows for chaining post-processing effects. If no post-processing has been
         # applied yet, it falls back to the original corrected data.
-        source_data = self.processed_results if self.processed_results else self.current_results
 
         # Determine the source series from the chosen data source
         if selected_series_name == "All Series":
@@ -743,16 +816,11 @@ class MainAppWindow(QMainWindow):
             source_series = next((s for s in source_data.get('series_data', []) if s['series_name'] == selected_series_name), None)
             source_series_list = [source_series] if source_series else []
 
-        if not source_series_list:
-            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS)  # Clear plot if series not found
-            return
-
-        active_series = [s for s in source_series_list if not s.get('is_deleted', False)]
+        active_series = [s for s in source_series_list if not s.get('is_deleted', False)] if source_series_list else []
 
         if not active_series:
-            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS)
+            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, x_scale=x_scale, y_scale=y_scale)
             return
-
         interactive_mode = (selected_series_name != "All Series" and params.get('manual_editing_enabled', False))
 
         # If in interactive mode, get the current points from the canvas to use for processing
@@ -762,11 +830,14 @@ class MainAppWindow(QMainWindow):
             # If we are in interactive mode but have no points yet (e.g. before initialization),
             # we can't process, so we just show an empty plot with interactive mode enabled.
             if not override_points:
-                self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, interactive_mode=True)
+                self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, interactive_mode=True,
+                                                                   x_scale=x_scale, y_scale=y_scale)
                 return
 
         # Run processing on a deep copy to not affect the original
-        processed_preview = PostProcessor.process(copy.deepcopy(active_series), params, override_points=override_points)
+        processed_preview = PostProcessor.process(copy.deepcopy(active_series), params,
+                                                override_points=override_points,
+                                                x_scale=x_scale, y_scale=y_scale, outlier_method=outlier_method)
 
         # --- NEW: Handle showing original data overlay ---
         original_data_to_show = None
@@ -774,18 +845,24 @@ class MainAppWindow(QMainWindow):
             original_data_to_show = active_series
 
         # Update the plot with the temporary result and optional original data
-        self.postprocessing_tab.postproc_canvas.update_plot(processed_preview, self.SERIES_COLORS,
-                                         original_series=original_data_to_show, interactive_mode=interactive_mode)
+        self.postprocessing_tab.postproc_canvas.update_plot(
+            processed_preview, self.SERIES_COLORS,
+            original_series=original_data_to_show,
+            interactive_mode=interactive_mode,
+            x_scale=x_scale, y_scale=y_scale
+        )
 
     def _display_current_postproc_state(self):
         """Displays the currently committed post-processing state in the plot."""
         source_data = self.processed_results if self.processed_results else self.current_results
         if not source_data or not source_data.get('series_data'):
-            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS)
+            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, x_scale='linear', y_scale='linear')
             return
 
         all_active_series = [s for s in source_data['series_data'] if not s.get('is_deleted', False)]
 
+        x_scale = source_data.get('x_scale_type', 'linear')
+        y_scale = source_data.get('y_scale_type', 'linear')
         selected_series_name = self.postprocessing_tab.postproc_series_combo.currentText()
 
         series_to_plot = []
@@ -814,8 +891,12 @@ class MainAppWindow(QMainWindow):
             else:
                 original_series_to_show = [s for s in original_series_all if s['series_name'] == selected_series_name]
 
-        self.postprocessing_tab.postproc_canvas.update_plot(series_to_plot, self.SERIES_COLORS,
-                                         original_series=original_series_to_show, interactive_mode=interactive_mode)
+        self.postprocessing_tab.postproc_canvas.update_plot(
+            series_to_plot, self.SERIES_COLORS,
+            original_series=original_series_to_show,
+            interactive_mode=interactive_mode,
+            x_scale=x_scale, y_scale=y_scale
+        )
 
     def _update_postproc_combo_box(self):
         """Keeps the post-processing series dropdown in sync with the series editor widgets."""
@@ -884,9 +965,19 @@ class MainAppWindow(QMainWindow):
 
     def toggle_outlier_controls(self, checked):
         """Enables/disables the child controls of the outlier group."""
-        self.postprocessing_tab.outlier_window_spin.setEnabled(checked)
+        self.postprocessing_tab.outlier_method_combo.setEnabled(checked)
         self.postprocessing_tab.outlier_threshold_spin.setEnabled(checked)
+        # Also handle the method-specific controls
+        self.handle_outlier_method_change(self.postprocessing_tab.outlier_method_combo.currentText())
         self._run_postprocessing_preview()
+
+    def handle_outlier_method_change(self, method_text):
+        """Shows/hides controls specific to the selected outlier method."""
+        is_local_regression = (method_text == "Local Regression")
+        is_enabled = self.postprocessing_tab.outlier_enabled_check.isChecked()
+        self.postprocessing_tab.outlier_window_spin.setVisible(is_local_regression)
+        self.postprocessing_tab.outlier_window_label.setVisible(is_local_regression)
+        self.postprocessing_tab.outlier_window_spin.setEnabled(is_local_regression and is_enabled)
 
     def handle_interactive_plot_changed(self, points):
         """Handles updates from the interactive plot when points are moved."""
@@ -1165,7 +1256,8 @@ class MainAppWindow(QMainWindow):
         if hasattr(self, 'save_tab'):
             self.save_tab.export_mat_btn.setEnabled(False)
         if hasattr(self, 'postprocessing_tab'):
-            self.postprocessing_tab.postproc_canvas.update_plot([], [])
+            # Clear plot with default linear scales
+            self.postprocessing_tab.postproc_canvas.update_plot([], [], x_scale='linear', y_scale='linear')
             self.postprocessing_tab.postproc_canvas.interactive_points = []
             self.postprocessing_tab.postproc_series_combo.clear()
         self.processed_results = None

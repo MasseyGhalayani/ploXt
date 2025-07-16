@@ -211,36 +211,97 @@ class ChartExtractor:
         return best_params
 
     @staticmethod
-    def _create_axis_scaler(ticks, axis_type='x'):
+    def _detect_axis_scale(ticks):
+        """
+        Heuristically determines if an axis scale is linear or logarithmic
+        by analyzing the spacing of its tick values.
+        """
+        if len(ticks) < 3:
+            return 'linear'  # Not enough information, assume linear
+
+        # Log scales work with positive values.
+        values = sorted([t['value'] for t in ticks if t['value'] > 0])
+        if len(values) < 3:
+            return 'linear'
+
+        values = np.array(values, dtype=float)
+        diffs = np.diff(values)
+
+        # Use errstate to prevent warnings on division by zero if values contain 0
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ratios = values[1:] / values[:-1]
+
+        # Filter out non-finite values that could result from division by zero
+        ratios = ratios[np.isfinite(ratios)]
+
+        if len(ratios) < 2 or len(diffs) < 2:
+            return 'linear'
+
+        # Compare the coefficient of variation (std/mean) to see which is more stable.
+        # A stable ratio suggests a log scale; a stable difference suggests a linear scale.
+        # Use a high value for CoV if mean is zero to avoid division by zero.
+        diff_cov = np.std(diffs) / np.mean(diffs) if np.mean(diffs) != 0 else float('inf')
+        ratio_cov = np.std(ratios) / np.mean(ratios) if np.mean(ratios) != 0 else float('inf')
+
+        # A very low ratio CoV is a strong indicator of a log scale.
+        # We also check that it's significantly more consistent than the differences.
+        if ratio_cov < 0.1 and ratio_cov < (diff_cov * 0.5):
+            return 'log'
+        else:
+            return 'linear'
+
+    @staticmethod
+    def _create_axis_scaler(ticks, axis_type='x', scale_type='linear'):
         """
         Creates a linear scaler function from a list of tick information using linear regression.
         This is more robust to OCR outliers than a simple min/max mapping.
+        --- MODIFIED: Can now create scalers for both 'linear' and 'log' scales. ---
         """
         if len(ticks) < 2:
             return None
 
         # Extract pixel and data value pairs for regression
-        pixel_coords = np.array([t['pixel'] for t in ticks])
-        data_values = np.array([t['value'] for t in ticks])
 
         # Use linear regression (polyfit with degree 1) to find the best-fit line
         # that maps pixel coordinates to data values.
         # The model is: data_value = m * pixel_coord + c
         # np.polyfit returns the coefficients [m, c]
         try:
-            m, c = np.polyfit(pixel_coords, data_values, 1)
+            if scale_type == 'log':
+                # For log scales, we need to fit against the log of the values.
+                # Filter for positive values, which are required for a log scale.
+                positive_ticks = [t for t in ticks if t['value'] > 0]
+                if len(positive_ticks) < 2:
+                    print(f"Warning: Not enough positive ticks for log scale on {axis_type}-axis. Cannot create scaler.")
+                    return None
+
+                pixel_coords = np.array([t['pixel'] for t in positive_ticks])
+                data_values = np.array([t['value'] for t in positive_ticks])
+
+                # Fit pixel coordinates to the log10 of the data values
+                m, c = np.polyfit(pixel_coords, np.log10(data_values), 1)
+
+                def log_scaler(pixel_coord):
+                    # Apply the linear model in log space, then convert back with an exponent
+                    return 10**(m * pixel_coord + c)
+
+                return log_scaler
+
+            else: # Default to linear
+                pixel_coords = np.array([t['pixel'] for t in ticks])
+                data_values = np.array([t['value'] for t in ticks])
+                m, c = np.polyfit(pixel_coords, data_values, 1)
+
+                def linear_scaler(pixel_coord):
+                    # The scaler function simply applies the linear equation found by the regression.
+                    return m * pixel_coord + c
+
+                return linear_scaler
+
         except (np.linalg.LinAlgError, ValueError):
             # This can happen if the input data is degenerate (e.g., all points on a vertical line).
             print(f"Warning: Linear regression failed for {axis_type}-axis. Cannot create scaler.")
             return None
-
-        # The scaler function simply applies the linear equation found by the regression.
-        # This works for both X and Y axes, as the slope 'm' will be positive for X
-        # and negative for Y (since pixel Y increases downwards).
-        def scaler(pixel_coord):
-            return m * pixel_coord + c
-
-        return scaler
 
     def _extract_ocr_data(self, yolo_results, full_image, ocr_params=None, debug_ocr=False):
         """
@@ -366,6 +427,11 @@ class ChartExtractor:
         # --- FIX: Get the colors from the result dictionary if available ---
         plot_colors = extraction_result.get('colors')
 
+        # --- NEW: Set axis scales based on detected types before plotting ---
+        # This ensures the visual representation matches the data's nature.
+        plt.xscale(extraction_result.get('x_scale_type', 'linear'))
+        plt.yscale(extraction_result.get('y_scale_type', 'linear'))
+
         for i, series in enumerate(extraction_result['series_data']):
             df = pd.DataFrame(series['data_points'])
             if not df.empty:
@@ -379,7 +445,8 @@ class ChartExtractor:
         plt.ylabel(extraction_result['y_axis_title'])
         plt.title(extraction_result.get('plot_title', 'Recreated Plot from Extracted Data'))
         plt.legend()
-        plt.grid(True)
+        # Use which='both' to show grid lines correctly for linear and log scales
+        plt.grid(True, which='both', linestyle='--', linewidth='0.5')
 
         buf = io.BytesIO()
         plt.savefig(buf, format='png', bbox_inches='tight')
@@ -467,11 +534,20 @@ class ChartExtractor:
         x_axis_ticks = [{'value': t['value'], 'pixel': t['pixel_x']} for t in corrected_ocr_data['ticks'] if t.get('axis') == 'x']
         y_axis_ticks = [{'value': t['value'], 'pixel': t['pixel_y']} for t in corrected_ocr_data['ticks'] if t.get('axis') == 'y']
 
-        y_scaler = self._create_axis_scaler(y_axis_ticks, axis_type='y')
-        x_scaler = self._create_axis_scaler(x_axis_ticks, axis_type='x')
+        # --- NEW: Detect scale type and create the appropriate scaler ---
+        x_scale_type = self._detect_axis_scale(x_axis_ticks)
+        y_scale_type = self._detect_axis_scale(y_axis_ticks)
+        print(f"  - Detected X-axis scale: '{x_scale_type}', Y-axis scale: '{y_scale_type}'")
+
+        y_scaler = self._create_axis_scaler(y_axis_ticks, axis_type='y', scale_type=y_scale_type)
+        x_scaler = self._create_axis_scaler(x_axis_ticks, axis_type='x', scale_type=x_scale_type)
 
         if not y_scaler or not x_scaler:
-            return {'status': 'error', 'message': 'Could not create axis scalers from corrected data.'}
+            msg = "Could not create axis scalers from corrected data. Check if ticks are sufficient and correctly defined."
+            # Add more detail if one of the scales was log but failed.
+            if (x_scale_type == 'log' and not x_scaler) or (y_scale_type == 'log' and not y_scaler):
+                msg += " Log scale detection might require at least two positive-valued ticks."
+            return {'status': 'error', 'message': msg}
 
         all_series_data = []
         for original_index, line in interpolated_lines:
@@ -484,7 +560,10 @@ class ChartExtractor:
 
         extraction_result = {'series_data': all_series_data, 'plot_title': corrected_ocr_data.get('plot_title', {}).get('text', 'Recreated Plot'), 'x_axis_title': corrected_ocr_data['x_axis_title']['text'], 'y_axis_title': corrected_ocr_data['y_axis_title']['text']}
         dataframes = [pd.DataFrame(s['data_points']) for s in extraction_result['series_data']]
-        return {'status': 'success', 'message': 'Recalculation complete.', 'dataframes': dataframes, 'series_data': extraction_result['series_data'], 'plot_title': extraction_result['plot_title'], 'x_axis_title': extraction_result['x_axis_title'], 'y_axis_title': extraction_result['y_axis_title']}
+        return {'status': 'success', 'message': 'Recalculation complete.', 'dataframes': dataframes,
+                'series_data': extraction_result['series_data'], 'plot_title': extraction_result['plot_title'],
+                'x_axis_title': extraction_result['x_axis_title'], 'y_axis_title': extraction_result['y_axis_title'],
+                'x_scale_type': x_scale_type, 'y_scale_type': y_scale_type}
 
 
 if __name__ == '__main__':
