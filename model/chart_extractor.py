@@ -2,6 +2,7 @@
 
 import argparse
 import io
+import copy
 import itertools
 from pathlib import Path
 
@@ -324,18 +325,26 @@ class ChartExtractor:
             "x_axis_title": {"text": "X-Axis", "bbox": None},
             "y_axis_title": {"text": "Y-Axis", "bbox": None},
             "ticks": [],
-            "ocr_debug_info": []  # New key for debug data
+            "ocr_debug_info": [],  # New key for debug data
+            # --- NEW: Store plot area and anchor guesses ---
+            "plot_area_bbox": None,
+            "x_anchor_guess": None,
+            "y_anchor_guess": None
         }
 
-        plot_area_box = next((box.xyxy[0] for box in boxes if names[int(box.cls)] == 'plot_area'), None)
+        plot_area_box = next((box.xyxy[0].tolist() for box in boxes if names[int(box.cls)] == 'plot_area'), None)
         if plot_area_box is None:
             print("Warning: No 'plot_area' detected.")
             h, w, _ = full_image.shape
             plot_area_box = [0, 0, w, h]
 
-        plot_x_center = (plot_area_box[0] + plot_area_box[2]) / 2
-        plot_y_center = (plot_area_box[1] + plot_area_box[3]) / 2
+        # --- NEW: Store the bbox and anchors in ocr_data ---
+        ocr_data['plot_area_bbox'] = plot_area_box
+        ocr_data['x_anchor_guess'] = (plot_area_box[0] + plot_area_box[2]) / 2
+        ocr_data['y_anchor_guess'] = (plot_area_box[1] + plot_area_box[3]) / 2
 
+        plot_x_center = ocr_data['x_anchor_guess']
+        plot_y_center = ocr_data['y_anchor_guess']
         for box in boxes:
             class_name = names[int(box.cls)]
             bbox = box.xyxy[0].tolist()
@@ -417,6 +426,37 @@ class ChartExtractor:
                 })
         return ocr_data
 
+    @staticmethod
+    def reclassify_ticks(ocr_data, x_anchor_x, y_anchor_y):
+        """
+        Re-assigns the 'axis' for each tick based on new anchor positions.
+        Returns a new ocr_data dictionary with updated ticks.
+        """
+        if 'ticks' not in ocr_data:
+            return ocr_data
+
+        # Work on a copy to avoid modifying the original dict in place before confirmation
+        new_ocr_data = copy.deepcopy(ocr_data)
+
+        plot_area_box = new_ocr_data.get('plot_area_bbox')
+        if plot_area_box is None:
+            # This should not happen if we store it correctly
+            plot_y1, plot_y2 = -float('inf'), float('inf')
+        else:
+            plot_y1, plot_y2 = plot_area_box[1], plot_area_box[3]
+
+        for tick in new_ocr_data['ticks']:
+            box_x, box_y = tick['pixel_x'], tick['pixel_y']
+
+            # Reset axis before re-classifying
+            tick['axis'] = 'unknown'
+
+            if box_x < x_anchor_x and (plot_y1 < box_y < plot_y2):
+                tick['axis'] = 'y'
+            elif box_y > y_anchor_y:
+                tick['axis'] = 'x'
+
+        return new_ocr_data
     @staticmethod
     def _recreate_plot_image(extraction_result):
         """Generates a plot from the extracted data and returns it as a NumPy image array."""

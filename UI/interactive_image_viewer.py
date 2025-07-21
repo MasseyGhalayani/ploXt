@@ -1,8 +1,9 @@
 # UI/interactive_image_viewer.py
 import cv2
+import copy
 import numpy as np
-from PyQt5.QtWidgets import QLabel
-from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor
+from PyQt5.QtWidgets import QLabel, QApplication
+from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor, QCursor
 from PyQt5.QtCore import Qt, QPoint, QRect, pyqtSignal, QRectF
 
 from UI.gui_widgets import Magnifier
@@ -32,6 +33,11 @@ class InteractiveImageViewer(QLabel):
         self.current_tool = 'brush'
         self.selection_start_point = None
         self.selection_rect = QRect()
+
+        # --- NEW: Draggable Ticks State ---
+        self.draggable_ticks_visible = False
+        self.draggable_ticks = []  # List of dicts from ocr_data['ticks']
+        self.dragged_tick_index = None
 
         # Undo/Redo Stack
         self.undo_stack = []
@@ -77,6 +83,23 @@ class InteractiveImageViewer(QLabel):
             self.undo_stack.append(self.editable_pixmap.copy())
             self.update_display()
 
+    def show_draggable_ticks(self, show, ticks_data=None):
+        """Shows or hides the draggable tick lines."""
+        self.draggable_ticks_visible = show
+        if show and ticks_data is not None:
+            # We work on a copy so we don't modify the main app's state directly during drag
+            self.draggable_ticks = copy.deepcopy(ticks_data)
+        else:
+            self.draggable_ticks = []
+            self.dragged_tick_index = None
+            self.unsetCursor()
+        self.update()  # Trigger repaint
+
+    def get_corrected_ticks(self):
+        """Returns the current positions of the draggable ticks."""
+        # Return a copy to prevent external modification
+        return copy.deepcopy(self.draggable_ticks)
+
     def get_adaptive_brush_size(self):
         """Returns the brush size corresponding to the current zoom level."""
         return self.brush_sizes[self.current_zoom_index]
@@ -120,6 +143,27 @@ class InteractiveImageViewer(QLabel):
         if self.editable_pixmap is None:
             return
 
+        # --- NEW: Handle tick line dragging ---
+        if event.button() == Qt.LeftButton and self.draggable_ticks_visible:
+            widget_pos = event.pos()
+            min_dist = float('inf')
+            closest_tick_index = None
+
+            for i, tick in enumerate(self.draggable_ticks):
+                widget_tick_pos = self.map_pixmap_pos_to_widget(QPoint(tick['pixel_x'], tick['pixel_y']))
+                dist = 0
+                if tick['axis'] == 'x':
+                    dist = abs(widget_pos.x() - widget_tick_pos.x())
+                elif tick['axis'] == 'y':
+                    dist = abs(widget_pos.y() - widget_tick_pos.y())
+
+                if dist < 10 and dist < min_dist: # 10 pixel grab radius
+                    min_dist = dist
+                    closest_tick_index = i
+            if closest_tick_index is not None:
+                self.dragged_tick_index = closest_tick_index
+                return # Consume event
+
         if event.button() == Qt.LeftButton:
             if self.current_tool == 'brush':
                 self.drawing = True
@@ -135,6 +179,36 @@ class InteractiveImageViewer(QLabel):
     def mouseMoveEvent(self, event):
         if self.editable_pixmap is None:
             return
+
+        # --- NEW: Handle tick line dragging ---
+        if self.dragged_tick_index is not None:
+            pixmap_pos = self.map_pos_to_pixmap(event.pos())
+            tick = self.draggable_ticks[self.dragged_tick_index]
+            if tick['axis'] == 'x':
+                tick['pixel_x'] = pixmap_pos.x()
+            elif tick['axis'] == 'y':
+                tick['pixel_y'] = pixmap_pos.y()
+            self.update()
+            return  # Prevent other tools from running
+
+        # --- NEW: Change cursor when hovering over tick lines ---
+        if self.draggable_ticks_visible and not (event.buttons() & Qt.LeftButton):
+            widget_pos = event.pos()
+            hovering = False
+            for tick in self.draggable_ticks:
+                widget_tick_pos = self.map_pixmap_pos_to_widget(QPoint(tick['pixel_x'], tick['pixel_y']))
+                if tick['axis'] == 'x' and abs(widget_pos.x() - widget_tick_pos.x()) < 10:
+                    self.setCursor(Qt.SizeHorCursor)
+                    hovering = True
+                    break
+                elif tick['axis'] == 'y' and abs(widget_pos.y() - widget_tick_pos.y()) < 10:
+                    self.setCursor(Qt.SizeVerCursor)
+                    hovering = True
+                    break
+            if not hovering:
+                self.unsetCursor()
+        elif not self.draggable_ticks_visible and self.cursor() is not None and self.cursor().shape() != Qt.ArrowCursor:
+            self.unsetCursor()
 
         if event.buttons() & Qt.RightButton:
             self.update_magnifier(event.pos())
@@ -158,6 +232,11 @@ class InteractiveImageViewer(QLabel):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            # --- NEW: Stop dragging tick line ---
+            if self.dragged_tick_index is not None:
+                self.dragged_tick_index = None
+                return # Consume event
+
             if self.drawing:
                 self.drawing = False
                 if self.current_tool == 'select_and_fill':
@@ -186,6 +265,28 @@ class InteractiveImageViewer(QLabel):
 
         # Use a single painter for all subsequent overlay drawings
         painter = QPainter(self)
+
+        # --- NEW: Draw draggable tick lines ---
+        if self.draggable_ticks_visible and self.draggable_ticks:
+            x_pen = QPen(QColor(0, 150, 255, 200), 2, Qt.DashLine) # Blue for X
+            y_pen = QPen(QColor(0, 200, 150, 200), 2, Qt.DashLine) # Teal for Y
+            bbox_pen = QPen(QColor(255, 255, 0, 150), 1, Qt.DotLine) # Yellow for bbox
+
+            for tick in self.draggable_ticks:
+                if tick['axis'] == 'x':
+                    painter.setPen(x_pen)
+                    widget_pos = self.map_pixmap_pos_to_widget(QPoint(tick['pixel_x'], tick['pixel_y']))
+                    painter.drawLine(widget_pos.x(), 0, widget_pos.x(), self.height())
+                elif tick['axis'] == 'y':
+                    painter.setPen(y_pen)
+                    widget_pos = self.map_pixmap_pos_to_widget(QPoint(tick['pixel_x'], tick['pixel_y']))
+                    painter.drawLine(0, widget_pos.y(), self.width(), widget_pos.y())
+
+                # Also draw the bounding box of the tick label
+                painter.setPen(bbox_pen)
+                bbox = tick.get('bbox')
+                if bbox:
+                    painter.drawRect(self.map_rect_to_widget(QRect(*map(int, bbox))))
 
         # Draw mask overlay if it's visible and available
         if self.masks_visible and self.mask_overlay_pixmap:
@@ -253,6 +354,13 @@ class InteractiveImageViewer(QLabel):
         pixmap_x = (pos.x() - offset_x) / scale_factor
         pixmap_y = (pos.y() - offset_y) / scale_factor
         return QPoint(int(pixmap_x), int(pixmap_y))
+
+    def map_pixmap_pos_to_widget(self, pixmap_pos: QPoint) -> QPoint:
+        offset_x, offset_y, scale_factor = self.get_scaled_pixmap_geometry()
+        if scale_factor == 0: return pixmap_pos
+        widget_x = pixmap_pos.x() * scale_factor + offset_x
+        widget_y = pixmap_pos.y() * scale_factor + offset_y
+        return QPoint(int(widget_x), int(widget_y))
 
     def map_rect_to_widget(self, rect: QRect) -> QRect:
         offset_x, offset_y, scale_factor = self.get_scaled_pixmap_geometry()

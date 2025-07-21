@@ -223,6 +223,13 @@ class MainAppWindow(QMainWindow):
         self.show_masks_action.toggled.connect(self.toggle_masks_display)
         toolbar.addAction(self.show_masks_action)
 
+        # --- NEW: Correct Ticks Action ---
+        self.correct_ticks_action = QAction(style.standardIcon(style.SP_CustomBase), "Correct Tick Positions", self)
+        self.correct_ticks_action.setCheckable(True)
+        self.correct_ticks_action.setEnabled(False)
+        self.correct_ticks_action.toggled.connect(self.toggle_draggable_ticks_display)
+        toolbar.addAction(self.correct_ticks_action)
+
         toolbar.addSeparator()
 
         # Undo/Redo Actions
@@ -408,6 +415,7 @@ class MainAppWindow(QMainWindow):
         self.run_btn.setEnabled(False)
         self.correction_tab.apply_corrections_btn.setEnabled(False)
         self.show_masks_action.setEnabled(False)  # Disable while running
+        self.correct_ticks_action.setEnabled(False)  # Disable while running
         edited_image_np = self.image_viewer.get_edited_image_as_numpy()
 
         if edited_image_np is None:
@@ -424,6 +432,7 @@ class MainAppWindow(QMainWindow):
         self.statusBar().showMessage(result.get('message', 'Processing complete.'), 5000)
         self.run_btn.setEnabled(True)
         self.current_results = result
+        self.correct_ticks_action.setEnabled(False)  # Disable before checks
 
         # --- REFACTORED WORKFLOW ---
         # 1. Clear all results from the previous run first.
@@ -453,12 +462,14 @@ class MainAppWindow(QMainWindow):
             self._update_all_views()  # Central update
             self.correction_tab.apply_corrections_btn.setEnabled(True)
             self.show_masks_action.setEnabled(True)
+            self.correct_ticks_action.setEnabled(True)  # Enable on success
             self.postprocessing_tab.reset_all_btn.setEnabled(False)  # Disabled until first processing
             self.postprocessing_tab.apply_postprocessing_btn.setEnabled(True)
             # Clear the plot with default linear scale until user interacts.
             self.postprocessing_tab.postproc_canvas.update_plot([], [], x_scale='linear', y_scale='linear')
         else:
             # On failure, the OCR debug tab is still populated, so we just show the error.
+            self.correct_ticks_action.setEnabled(False)
             QMessageBox.critical(self, "Inference Error", result['message'])
             self.postprocessing_tab.apply_postprocessing_btn.setEnabled(False)
 
@@ -564,8 +575,25 @@ class MainAppWindow(QMainWindow):
         """
         if not self.current_results: return
 
-        # --- 1. Read all corrected values from UI and check for changes ---
-        current_ocr_data = self.current_results.get('ocr_data', {})
+        # --- 1. Create a working copy of OCR data and check for changes ---
+        corrected_ocr = copy.deepcopy(self.current_results['ocr_data'])
+        ticks_changed_by_position = False
+
+        # --- Check for changes from draggable ticks ---
+        if self.correct_ticks_action.isChecked():
+            corrected_ticks_from_viewer = self.image_viewer.get_corrected_ticks()
+            if len(corrected_ticks_from_viewer) == len(corrected_ocr['ticks']):
+                for i, original_tick in enumerate(corrected_ocr['ticks']):
+                    viewer_tick = corrected_ticks_from_viewer[i]
+                    if original_tick['pixel_x'] != viewer_tick['pixel_x'] or \
+                       original_tick['pixel_y'] != viewer_tick['pixel_y']:
+                        ticks_changed_by_position = True
+                    # Update the pixel coordinates in our working copy
+                    original_tick['pixel_x'] = viewer_tick['pixel_x']
+                    original_tick['pixel_y'] = viewer_tick['pixel_y']
+            else:
+                QMessageBox.critical(self, "Error", "Tick data mismatch. Cannot apply position corrections.")
+                return
 
         def to_float_or_nan(s):
             try:
@@ -573,33 +601,35 @@ class MainAppWindow(QMainWindow):
             except (ValueError, TypeError):
                 return np.nan
 
+        # --- Check for changes from tick value tables ---
         new_x_tick_values = [to_float_or_nan(self.correction_tab.x_ticks_table.item(i, 2).text()) for i in
                              range(self.correction_tab.x_ticks_table.rowCount())]
         new_y_tick_values = [to_float_or_nan(self.correction_tab.y_ticks_table.item(i, 2).text()) for i in
                              range(self.correction_tab.y_ticks_table.rowCount())]
 
-        old_x_tick_values = [t['value'] for t in current_ocr_data.get('ticks', []) if t.get('axis') == 'x']
-        old_y_tick_values = [t['value'] for t in current_ocr_data.get('ticks', []) if t.get('axis') == 'y']
+        old_x_tick_values = [t['value'] for t in self.current_results['ocr_data'].get('ticks', []) if t.get('axis') == 'x']
+        old_y_tick_values = [t['value'] for t in self.current_results['ocr_data'].get('ticks', []) if t.get('axis') == 'y']
 
         # Compare tick values to see if a full recalculation is needed.
-        ticks_changed = True
+        ticks_changed_by_value = True
         if len(new_x_tick_values) == len(old_x_tick_values) and len(new_y_tick_values) == len(old_y_tick_values):
             if np.allclose(new_x_tick_values, old_x_tick_values, equal_nan=True) and \
                     np.allclose(new_y_tick_values, old_y_tick_values, equal_nan=True):
-                ticks_changed = False
+                ticks_changed_by_value = False
 
         corrected_plot_title = self.correction_tab.plot_title_edit.text()
         corrected_x_title = self.correction_tab.x_title_edit.text()
         corrected_y_title = self.correction_tab.y_title_edit.text()
 
-        titles_changed = (corrected_plot_title != current_ocr_data.get('plot_title', {}).get('text', '') or
-                          corrected_x_title != current_ocr_data.get('x_axis_title', {}).get('text', '') or
-                          corrected_y_title != current_ocr_data.get('y_axis_title', {}).get('text', ''))
+        titles_changed = (corrected_plot_title != self.current_results['ocr_data'].get('plot_title', {}).get('text', '') or
+                          corrected_x_title != self.current_results['ocr_data'].get('x_axis_title', {}).get('text', '') or
+                          corrected_y_title != self.current_results['ocr_data'].get('y_axis_title', {}).get('text', ''))
 
         series_changed = (any(w.name_edit.text() != w.original_name or w.is_deleted for w in self.series_widgets))
 
         # --- 2. Decide on update path ---
-        if not ticks_changed:
+        recalculation_needed = ticks_changed_by_position or ticks_changed_by_value
+        if not recalculation_needed:
             # --- PATH A: Metadata-only update. No data recalculation needed. ---
             if not titles_changed:
                 if not series_changed:
@@ -624,7 +654,7 @@ class MainAppWindow(QMainWindow):
             return
 
         # --- PATH B: Ticks changed. Full data recalculation is required. ---
-        print("--- Tick values changed, performing full recalculation ---")
+        print("--- Tick positions or values changed, performing full recalculation ---")
         if self.processed_results:
             reply = QMessageBox.question(self, "Confirm Recalculation",
                                          "Changing axis tick values requires re-calculating all data points from scratch. "
@@ -635,7 +665,6 @@ class MainAppWindow(QMainWindow):
                 return
 
         # Proceed with full recalculation
-        corrected_ocr = self.current_results['ocr_data']
         corrected_ocr['plot_title']['text'] = corrected_plot_title
         corrected_ocr['x_axis_title']['text'] = corrected_x_title
         corrected_ocr['y_axis_title']['text'] = corrected_y_title
@@ -707,6 +736,23 @@ class MainAppWindow(QMainWindow):
             h, w, ch = plot_image_np.shape
             q_img = QImage(plot_image_np.data, w, h, ch * w, QImage.Format_ARGB32)
             self.results_tab.plot_label.setPixmap(QPixmap.fromImage(q_img))
+
+    def toggle_draggable_ticks_display(self, checked):
+        """Shows or hides the draggable tick lines."""
+        if not self.current_results or not self.current_results.get('ocr_data'):
+            return
+
+        if checked:
+            ticks = self.current_results['ocr_data'].get('ticks', [])
+            if not ticks:
+                self.statusBar().showMessage("No ticks detected to correct.", 3000)
+                self.correct_ticks_action.setChecked(False)
+                return
+            self.image_viewer.show_draggable_ticks(True, ticks_data=ticks)
+            self.statusBar().showMessage("Tick correction mode enabled. Drag lines to adjust tick positions.", 5000)
+        else:
+            self.image_viewer.show_draggable_ticks(False)
+            self.statusBar().clearMessage()
 
     def handle_apply_postprocessing(self):
         if not self.current_results or 'series_data' not in self.current_results:
@@ -1370,5 +1416,9 @@ class MainAppWindow(QMainWindow):
         self.show_masks_action.setEnabled(False)
         self.show_masks_action.setChecked(False)
         self.mask_overlay_pixmap = None
+        # --- NEW: Clear draggable ticks state ---
+        self.correct_ticks_action.setEnabled(False)
+        self.correct_ticks_action.setChecked(False)
+        self.image_viewer.show_draggable_ticks(False)
         if clear_image_viewer_state:
             self.image_viewer.set_image(QPixmap())  # Clear image viewer
