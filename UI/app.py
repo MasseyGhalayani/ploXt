@@ -3,12 +3,13 @@ import pandas as pd
 import copy
 import cv2
 import numpy as np
+from pathlib import Path
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                              QPushButton, QFileDialog, QLabel, QLineEdit, QFormLayout, QComboBox, QCheckBox,
                              QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QMessageBox,
                              QGroupBox, QScrollArea, QAction, QToolBar, QActionGroup, QDoubleSpinBox, QSpinBox,
                              QToolButton, QMenu)
-from PyQt5.QtGui import QPixmap, QImage, QColor
+from PyQt5.QtGui import QPixmap, QImage, QColor, QIcon
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
@@ -87,6 +88,15 @@ class MainAppWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PloXt Ver 1.0.1")
+
+        # --- NEW: Set Application Icon ---
+        script_dir = Path(__file__).parent.resolve()
+        icon_path = script_dir / "resources" / "app_icon.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+        else:
+            print(f"Warning: Application icon not found at '{icon_path}'. Please create it.")
+
         self.setGeometry(100, 100, 1600, 900)
         self.extractor = None
         self.current_results = None
