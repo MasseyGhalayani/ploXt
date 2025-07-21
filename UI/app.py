@@ -6,7 +6,8 @@ import numpy as np
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                              QPushButton, QFileDialog, QLabel, QLineEdit, QFormLayout, QComboBox, QCheckBox,
                              QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QMessageBox,
-                             QGroupBox, QScrollArea, QAction, QToolBar, QActionGroup, QDoubleSpinBox, QSpinBox, QToolButton, QMenu)
+                             QGroupBox, QScrollArea, QAction, QToolBar, QActionGroup, QDoubleSpinBox, QSpinBox,
+                             QToolButton, QMenu)
 from PyQt5.QtGui import QPixmap, QImage, QColor
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -15,7 +16,7 @@ from model.chart_extractor import ChartExtractor
 from model.pdf_chart_extractor import PdfChartExtractor
 from model.post_processor import PostProcessor
 from .interactive_image_viewer import InteractiveImageViewer
-from .gui_widgets import (SeriesEditorWidget, OcrDebugWidget, InteractivePlotCanvas, 
+from .gui_widgets import (SeriesEditorWidget, OcrDebugWidget, InteractivePlotCanvas,
                           CorrectionTab, PostProcessingTab, SaveTab, ResultsTab)
 from .chart_selection_dialog import ChartSelectionDialog
 
@@ -66,20 +67,20 @@ class MainAppWindow(QMainWindow):
         self.setGeometry(100, 100, 1600, 900)
         self.extractor = None
         self.current_results = None
-        self.pdf_extractor = None # New extractor instance
+        self.pdf_extractor = None  # New extractor instance
         self.series_widgets = []
         self.ocr_debug_widgets = []
         self.processed_results = None
         self.ocr_target_widget = None
         self.best_ocr_params = {}
-        self.mask_overlay_pixmap = None # Cache for the overlay
-        self.chart_selection_dialog = None # To hold reference to the dialog
+        self.mask_overlay_pixmap = None  # Cache for the overlay
+        self.chart_selection_dialog = None  # To hold reference to the dialog
 
         # --- NEW: Define a shared color palette for masks and plots ---
         self.SERIES_COLORS = [
             QColor(31, 119, 180, 120), QColor(255, 127, 14, 120), QColor(44, 160, 44, 120),
             QColor(214, 39, 40, 120), QColor(148, 103, 189, 120), QColor(140, 86, 75, 120)
-        ] # R, G, B, Alpha (for overlay)
+        ]  # R, G, B, Alpha (for overlay)
 
         # --- Main Layout ---
         central_widget = QWidget()
@@ -115,7 +116,7 @@ class MainAppWindow(QMainWindow):
         self.results_tab = ResultsTab()
         self.postprocessing_tab = PostProcessingTab()
         self.save_tab = SaveTab()
-        self.ocr_debug_tab = QWidget() # Keep OCR debug tab simple for now
+        self.ocr_debug_tab = QWidget()  # Keep OCR debug tab simple for now
 
         self.tabs.addTab(self.correction_tab, "Corrections")
         self.tabs.addTab(self.results_tab, "Results")
@@ -123,7 +124,7 @@ class MainAppWindow(QMainWindow):
         self.tabs.addTab(self.save_tab, "Save & Export")
         self.tabs.addTab(self.ocr_debug_tab, "OCR Debug")
 
-        self.build_ocr_debug_tab() # This method will now just populate the ocr_debug_tab
+        self.build_ocr_debug_tab()  # This method will now just populate the ocr_debug_tab
 
         right_panel_layout.addWidget(controls_group)
         right_panel_layout.addWidget(self.tabs)
@@ -131,10 +132,10 @@ class MainAppWindow(QMainWindow):
         # --- NEW: Add panels to splitter and set main layout ---
         splitter.addWidget(left_panel_group)
         splitter.addWidget(right_panel_widget)
-        splitter.setSizes([1000, 600]) # Set initial proportional sizes
+        splitter.setSizes([1000, 600])  # Set initial proportional sizes
 
         main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0) # Use full space
+        main_layout.setContentsMargins(0, 0, 0, 0)  # Use full space
         main_layout.addWidget(splitter)
 
         # --- Connections ---
@@ -164,10 +165,13 @@ class MainAppWindow(QMainWindow):
         self.postprocessing_tab.manual_interp_method_combo.currentTextChanged.connect(self._run_postprocessing_preview)
         # View options
         self.postprocessing_tab.show_original_check.toggled.connect(self._display_current_postproc_state)
-        
-        self.correction_tab.plot_title_ocr_btn.clicked.connect(lambda: self.start_ocr_selection(self.correction_tab.plot_title_edit, "Plot Title", rotate=False))
-        self.correction_tab.x_title_ocr_btn.clicked.connect(lambda: self.start_ocr_selection(self.correction_tab.x_title_edit, "X-Axis Title", rotate=False))
-        self.correction_tab.y_title_ocr_btn.clicked.connect(lambda: self.start_ocr_selection(self.correction_tab.y_title_edit, "Y-Axis Title", rotate=True))
+
+        self.correction_tab.plot_title_ocr_btn.clicked.connect(
+            lambda: self.start_ocr_selection(self.correction_tab.plot_title_edit, "Plot Title", rotate=False))
+        self.correction_tab.x_title_ocr_btn.clicked.connect(
+            lambda: self.start_ocr_selection(self.correction_tab.x_title_edit, "X-Axis Title", rotate=False))
+        self.correction_tab.y_title_ocr_btn.clicked.connect(
+            lambda: self.start_ocr_selection(self.correction_tab.y_title_edit, "Y-Axis Title", rotate=True))
 
         self.save_tab.export_csv_btn.clicked.connect(self.export_as_csv)
         self.save_tab.export_mat_btn.clicked.connect(self.export_as_mat)
@@ -235,7 +239,8 @@ class MainAppWindow(QMainWindow):
         # Determine the final data to be displayed and saved
         final_data_source = self.processed_results if self.processed_results else self.current_results
 
-        if not final_data_source or not [s for s in final_data_source.get('series_data', []) if not s.get('is_deleted', False)]:
+        if not final_data_source or not [s for s in final_data_source.get('series_data', []) if
+                                         not s.get('is_deleted', False)]:
             # Clear all views if there is no data
             self.results_tab.plot_label.setText("Recreated plot will appear here.")
             self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS)
@@ -276,7 +281,13 @@ class MainAppWindow(QMainWindow):
         for i, series in enumerate(results_data['series_data']):
             df = pd.DataFrame(series['data_points'])
             series_name = series.get('series_name', f'series_{i + 1}')
-            df.columns = [f'{series_name}_x', f'{series_name}_y']
+            # --- FIX: Check for empty dataframe before assigning columns ---
+            if df.empty:
+                # For empty series, create an empty DataFrame with the correct column names
+                # to prevent errors and ensure proper alignment during concatenation.
+                df = pd.DataFrame(columns=[f'{series_name}_x', f'{series_name}_y'])
+            else:
+                df.columns = [f'{series_name}_x', f'{series_name}_y']
             all_dfs.append(df)
 
         if not all_dfs:
@@ -299,7 +310,7 @@ class MainAppWindow(QMainWindow):
     def build_ocr_debug_tab(self):
         layout = QVBoxLayout(self.ocr_debug_tab)
 
-         # --- NEW: Global OCR Controls ---
+        # --- NEW: Global OCR Controls ---
         global_controls_group = QGroupBox("Global OCR Parameters")
         global_controls_layout = QFormLayout(global_controls_group)
 
@@ -388,7 +399,7 @@ class MainAppWindow(QMainWindow):
             self.image_viewer.set_image(pixmap)
             self.clear_results(clear_image_viewer_state=False)
             self.run_btn.setEnabled(True)
-            self.best_ocr_params = {} # Reset for new image
+            self.best_ocr_params = {}  # Reset for new image
             self.statusBar().showMessage("Selected chart loaded. You can now run inference.", 5000)
 
     def run_inference(self):
@@ -396,7 +407,7 @@ class MainAppWindow(QMainWindow):
         self.statusBar().showMessage("Running inference... This may take a while.")
         self.run_btn.setEnabled(False)
         self.correction_tab.apply_corrections_btn.setEnabled(False)
-        self.show_masks_action.setEnabled(False) # Disable while running
+        self.show_masks_action.setEnabled(False)  # Disable while running
         edited_image_np = self.image_viewer.get_edited_image_as_numpy()
 
         if edited_image_np is None:
@@ -427,7 +438,7 @@ class MainAppWindow(QMainWindow):
 
         # 3. Populate other tabs and enable features only on success.
         if result['status'] == 'success':
-            self.mask_overlay_pixmap = None # Clear cached overlay
+            self.mask_overlay_pixmap = None  # Clear cached overlay
             # --- NEW: Save best OCR params for later use ---
             self.best_ocr_params = result.get('ocr_data', {}).get('best_params_found', {})
 
@@ -438,11 +449,11 @@ class MainAppWindow(QMainWindow):
                 self.ocr_margin_spinbox.setValue(self.best_ocr_params.get('margin', 2))
 
             self.populate_correction_fields(result)
-            self._update_postproc_combo_box() # Centralized update
-            self._update_all_views() # Central update
+            self._update_postproc_combo_box()  # Centralized update
+            self._update_all_views()  # Central update
             self.correction_tab.apply_corrections_btn.setEnabled(True)
             self.show_masks_action.setEnabled(True)
-            self.postprocessing_tab.reset_all_btn.setEnabled(False) # Disabled until first processing
+            self.postprocessing_tab.reset_all_btn.setEnabled(False)  # Disabled until first processing
             self.postprocessing_tab.apply_postprocessing_btn.setEnabled(True)
             # Clear the plot with default linear scale until user interacts.
             self.postprocessing_tab.postproc_canvas.update_plot([], [], x_scale='linear', y_scale='linear')
@@ -461,13 +472,15 @@ class MainAppWindow(QMainWindow):
         for i, df in enumerate(result.get('dataframes', [])):
             series_info = result['series_data'][i]
             color = self.SERIES_COLORS[i % len(self.SERIES_COLORS)]
-            editor = SeriesEditorWidget(series_info['series_name'], color, i) # Pass original index
+            editor = SeriesEditorWidget(series_info['series_name'], color, i)  # Pass original index
             self.correction_tab.series_container_layout.addWidget(editor)
             self.series_widgets.append(editor)
             # --- NEW: Connect to the centralized handler ---
             editor.nameChanged.connect(self.handle_series_metadata_changed)
             editor.deleteStateChanged.connect(self.handle_series_metadata_changed)
-            editor.ocrRequested.connect(lambda w=editor: self.start_ocr_selection(w.name_edit, f"Series '{w.original_name}'", rotate=False))
+            editor.duplicateRequested.connect(lambda w=editor: self.handle_duplicate_series(w))
+            editor.ocrRequested.connect(
+                lambda w=editor: self.start_ocr_selection(w.name_edit, f"Series '{w.original_name}'", rotate=False))
 
     def _update_correction_fields_from_data(self, ocr_data):
         """
@@ -543,7 +556,7 @@ class MainAppWindow(QMainWindow):
                 self.ocr_debug_layout.addWidget(widget)
                 self.ocr_debug_widgets.append(widget)
 
-    def apply_all_corrections(self): # --- ENTIRELY REWRITTEN ---
+    def apply_all_corrections(self):  # --- ENTIRELY REWRITTEN ---
         """
         Applies corrections from the UI. It intelligently determines if a full
         data recalculation is needed (if ticks changed) or if only a metadata
@@ -555,11 +568,15 @@ class MainAppWindow(QMainWindow):
         current_ocr_data = self.current_results.get('ocr_data', {})
 
         def to_float_or_nan(s):
-            try: return float(s)
-            except (ValueError, TypeError): return np.nan
+            try:
+                return float(s)
+            except (ValueError, TypeError):
+                return np.nan
 
-        new_x_tick_values = [to_float_or_nan(self.correction_tab.x_ticks_table.item(i, 2).text()) for i in range(self.correction_tab.x_ticks_table.rowCount())]
-        new_y_tick_values = [to_float_or_nan(self.correction_tab.y_ticks_table.item(i, 2).text()) for i in range(self.correction_tab.y_ticks_table.rowCount())]
+        new_x_tick_values = [to_float_or_nan(self.correction_tab.x_ticks_table.item(i, 2).text()) for i in
+                             range(self.correction_tab.x_ticks_table.rowCount())]
+        new_y_tick_values = [to_float_or_nan(self.correction_tab.y_ticks_table.item(i, 2).text()) for i in
+                             range(self.correction_tab.y_ticks_table.rowCount())]
 
         old_x_tick_values = [t['value'] for t in current_ocr_data.get('ticks', []) if t.get('axis') == 'x']
         old_y_tick_values = [t['value'] for t in current_ocr_data.get('ticks', []) if t.get('axis') == 'y']
@@ -568,7 +585,7 @@ class MainAppWindow(QMainWindow):
         ticks_changed = True
         if len(new_x_tick_values) == len(old_x_tick_values) and len(new_y_tick_values) == len(old_y_tick_values):
             if np.allclose(new_x_tick_values, old_x_tick_values, equal_nan=True) and \
-               np.allclose(new_y_tick_values, old_y_tick_values, equal_nan=True):
+                    np.allclose(new_y_tick_values, old_y_tick_values, equal_nan=True):
                 ticks_changed = False
 
         corrected_plot_title = self.correction_tab.plot_title_edit.text()
@@ -579,11 +596,14 @@ class MainAppWindow(QMainWindow):
                           corrected_x_title != current_ocr_data.get('x_axis_title', {}).get('text', '') or
                           corrected_y_title != current_ocr_data.get('y_axis_title', {}).get('text', ''))
 
+        series_changed = (any(w.name_edit.text() != w.original_name or w.is_deleted for w in self.series_widgets))
+
         # --- 2. Decide on update path ---
         if not ticks_changed:
             # --- PATH A: Metadata-only update. No data recalculation needed. ---
             if not titles_changed:
-                self.statusBar().showMessage("No changes to apply.", 3000)
+                if not series_changed:
+                    self.statusBar().showMessage("No changes to apply.", 3000)
                 return
 
             print("--- Applying metadata-only corrections (titles) ---")
@@ -658,7 +678,8 @@ class MainAppWindow(QMainWindow):
                     s['data_points'] = recalculated_map[s['original_index']]['data_points']
                     s['series_name'] = recalculated_map[s['original_index']]['series_name']
 
-            self.current_results['dataframes'] = [pd.DataFrame(s['data_points']) for s in self.current_results['series_data']]
+            self.current_results['dataframes'] = [pd.DataFrame(s['data_points']) for s in
+                                                  self.current_results['series_data']]
             self.current_results['plot_title'] = recalculated.get('plot_title')
             self.current_results['x_axis_title'] = recalculated.get('x_axis_title')
             self.current_results['y_axis_title'] = recalculated.get('y_axis_title')
@@ -700,7 +721,6 @@ class MainAppWindow(QMainWindow):
 
         # 1. Gather parameters from the UI
         params = self._get_postprocessing_params()
-
 
         # 2. Get the data to process from the LATEST data (processed or original)
         # --- MODIFIED: Use the latest processed data as the source for applying changes. ---
@@ -748,7 +768,8 @@ class MainAppWindow(QMainWindow):
                     self.processed_results['series_data'][i] = processed_chunk[0]
                     break
 
-        self.processed_results['dataframes'] = [pd.DataFrame(s['data_points']) for s in self.processed_results['series_data']]
+        self.processed_results['dataframes'] = [pd.DataFrame(s['data_points']) for s in
+                                                self.processed_results['series_data']]
 
         # 5. Refresh all views to show the newly committed state
         self._update_all_views()
@@ -767,11 +788,13 @@ class MainAppWindow(QMainWindow):
 
             'auto_resampling_enabled': self.postprocessing_tab.auto_resampling_enabled_check.isChecked(),
             'auto_resample_points': self.postprocessing_tab.auto_resample_points_spin.value(),
-            'auto_resample_method': self.postprocessing_tab.auto_resample_method_combo.currentText().lower().replace(' ', '_'),
+            'auto_resample_method': self.postprocessing_tab.auto_resample_method_combo.currentText().lower().replace(
+                ' ', '_'),
 
             'manual_editing_enabled': self.postprocessing_tab.manual_editing_enabled_check.isChecked(),
             'manual_final_points': self.postprocessing_tab.manual_final_points_spin.value(),
-            'manual_interp_method': self.postprocessing_tab.manual_interp_method_combo.currentText().lower().replace(' ', '_'),
+            'manual_interp_method': self.postprocessing_tab.manual_interp_method_combo.currentText().lower().replace(
+                ' ', '_'),
         }
 
     def _run_postprocessing_preview(self):
@@ -780,7 +803,8 @@ class MainAppWindow(QMainWindow):
         source_data = self.processed_results if self.processed_results else self.current_results
 
         if not source_data or not source_data.get('series_data'):
-            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, x_scale='linear', y_scale='linear')
+            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, x_scale='linear',
+                                                                y_scale='linear')
             return
 
         # Get latest parameters and scale types
@@ -796,9 +820,9 @@ class MainAppWindow(QMainWindow):
         # show the original data. Instead, we call _display_current_postproc_state,
         # which correctly shows self.processed_results if it exists.
         is_any_processing_enabled = (
-            params.get('outlier_removal_enabled') or
-            params.get('auto_resampling_enabled') or
-            params.get('manual_editing_enabled')
+                params.get('outlier_removal_enabled') or
+                params.get('auto_resampling_enabled') or
+                params.get('manual_editing_enabled')
         )
 
         if not is_any_processing_enabled:
@@ -813,13 +837,15 @@ class MainAppWindow(QMainWindow):
         if selected_series_name == "All Series":
             source_series_list = source_data.get('series_data', [])
         else:
-            source_series = next((s for s in source_data.get('series_data', []) if s['series_name'] == selected_series_name), None)
+            source_series = next(
+                (s for s in source_data.get('series_data', []) if s['series_name'] == selected_series_name), None)
             source_series_list = [source_series] if source_series else []
 
         active_series = [s for s in source_series_list if not s.get('is_deleted', False)] if source_series_list else []
 
         if not active_series:
-            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, x_scale=x_scale, y_scale=y_scale)
+            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, x_scale=x_scale,
+                                                                y_scale=y_scale)
             return
         interactive_mode = (selected_series_name != "All Series" and params.get('manual_editing_enabled', False))
 
@@ -831,13 +857,13 @@ class MainAppWindow(QMainWindow):
             # we can't process, so we just show an empty plot with interactive mode enabled.
             if not override_points:
                 self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, interactive_mode=True,
-                                                                   x_scale=x_scale, y_scale=y_scale)
+                                                                    x_scale=x_scale, y_scale=y_scale)
                 return
 
         # Run processing on a deep copy to not affect the original
         processed_preview = PostProcessor.process(copy.deepcopy(active_series), params,
-                                                override_points=override_points,
-                                                x_scale=x_scale, y_scale=y_scale, outlier_method=outlier_method)
+                                                  override_points=override_points,
+                                                  x_scale=x_scale, y_scale=y_scale, outlier_method=outlier_method)
 
         # --- NEW: Handle showing original data overlay ---
         original_data_to_show = None
@@ -856,7 +882,8 @@ class MainAppWindow(QMainWindow):
         """Displays the currently committed post-processing state in the plot."""
         source_data = self.processed_results if self.processed_results else self.current_results
         if not source_data or not source_data.get('series_data'):
-            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, x_scale='linear', y_scale='linear')
+            self.postprocessing_tab.postproc_canvas.update_plot([], self.SERIES_COLORS, x_scale='linear',
+                                                                y_scale='linear')
             return
 
         all_active_series = [s for s in source_data['series_data'] if not s.get('is_deleted', False)]
@@ -924,7 +951,7 @@ class MainAppWindow(QMainWindow):
                         series['series_name'] = series_name
                         series['is_deleted'] = is_deleted
                         break
-            
+
             if self.processed_results:
                 for series in self.processed_results.get('series_data', []):
                     if series.get('original_index') == original_index:
@@ -934,6 +961,71 @@ class MainAppWindow(QMainWindow):
 
         self._update_postproc_combo_box()
         self._update_all_views()
+
+    def handle_duplicate_series(self, source_widget):
+        """Creates a new series by duplicating an existing one."""
+        if not self.current_results or not self.current_results.get('series_data'):
+            return
+
+        source_index = source_widget.original_index
+
+        # Find the source series to duplicate in the master list (current_results)
+        source_series_current = next(
+            (s for s in self.current_results['series_data'] if s.get('original_index') == source_index), None)
+        if not source_series_current:
+            QMessageBox.warning(self, "Error", "Could not find the source series to duplicate.")
+            return
+
+        # --- 1. Create a new unique index ---
+        # Find the max existing index to ensure the new one is unique.
+        max_index = max(s.get('original_index', -1) for s in self.current_results['series_data'])
+        new_index = max_index + 1
+
+        # --- 2. Duplicate the data in `current_results` ---
+        new_current_series = copy.deepcopy(source_series_current)
+        new_current_series['series_name'] = f"{source_series_current.get('series_name', 'series')} (copy)"
+        new_current_series['original_index'] = new_index
+        new_current_series.pop('reference_points', None)  # Cloned series shouldn't inherit reference points
+        self.current_results['series_data'].append(new_current_series)
+        self.current_results['dataframes'].append(pd.DataFrame(new_current_series['data_points']))
+
+        # Also duplicate the underlying raw data. This is important for recalculation.
+        if source_index < len(self.current_results.get('raw_keypoints', [])):
+            self.current_results['raw_keypoints'].append(
+                copy.deepcopy(self.current_results['raw_keypoints'][source_index]))
+        if source_index < len(self.current_results.get('instance_masks', [])):
+            self.current_results['instance_masks'].append(
+                self.current_results['instance_masks'][source_index].copy())
+
+        # --- 3. Duplicate the data in `processed_results` if it exists ---
+        if self.processed_results:
+            source_series_processed = next(
+                (s for s in self.processed_results['series_data'] if s.get('original_index') == source_index), None)
+            if source_series_processed:
+                new_processed_series = copy.deepcopy(source_series_processed)
+                new_processed_series['series_name'] = new_current_series['series_name']  # Keep name consistent
+                new_processed_series['original_index'] = new_index
+                new_processed_series.pop('reference_points', None)
+                self.processed_results['series_data'].append(new_processed_series)
+                self.processed_results['dataframes'].append(pd.DataFrame(new_processed_series['data_points']))
+
+        # --- 4. Create and add the new UI widget ---
+        color = self.SERIES_COLORS[new_index % len(self.SERIES_COLORS)]
+        editor = SeriesEditorWidget(new_current_series['series_name'], color, new_index)
+        self.correction_tab.series_container_layout.addWidget(editor)
+        self.series_widgets.append(editor)
+
+        # Connect its signals, including its own duplicate button
+        editor.duplicateRequested.connect(lambda w=editor: self.handle_duplicate_series(w))
+        editor.nameChanged.connect(self.handle_series_metadata_changed)
+        editor.deleteStateChanged.connect(self.handle_series_metadata_changed)
+        editor.ocrRequested.connect(
+            lambda w=editor: self.start_ocr_selection(w.name_edit, f"Series '{w.original_name}'", rotate=False))
+
+        # --- 5. Refresh UI ---
+        self._update_postproc_combo_box()
+        self._update_all_views()
+        self.statusBar().showMessage(f"Series '{source_widget.get_series_name()}' duplicated.", 4000)
 
     def _update_postproc_controls_state(self, checked=None):
         """Manages the state of post-processing controls, ensuring mutual exclusivity."""
@@ -993,7 +1085,8 @@ class MainAppWindow(QMainWindow):
         if selected_series_name == "All Series":
             QMessageBox.information(self, "Select Series", "Please select a single series to edit manually.")
             return
-        source_series = next((s for s in self.current_results['series_data'] if s['series_name'] == selected_series_name), None)
+        source_series = next(
+            (s for s in self.current_results['series_data'] if s['series_name'] == selected_series_name), None)
         if not source_series: return
         num_ref_points = self.postprocessing_tab.manual_ref_points_spin.value()
         initial_ref_points = PostProcessor.resample_series(source_series['data_points'], num_ref_points, 'linear')
@@ -1006,12 +1099,14 @@ class MainAppWindow(QMainWindow):
         if selected_series_name == "All Series" or not self.current_results or not self.processed_results:
             return
 
-        series_to_reset = next((s for s in self.processed_results['series_data'] if s['series_name'] == selected_series_name), None)
+        series_to_reset = next(
+            (s for s in self.processed_results['series_data'] if s['series_name'] == selected_series_name), None)
         if not series_to_reset:
             return
 
         original_index = series_to_reset.get('original_index')
-        original_series = next((s for s in self.current_results['series_data'] if s.get('original_index') == original_index), None)
+        original_series = next(
+            (s for s in self.current_results['series_data'] if s.get('original_index') == original_index), None)
 
         if not original_series:
             return
@@ -1096,7 +1191,8 @@ class MainAppWindow(QMainWindow):
         self.ocr_target_widget = target_widget
         self.ocr_target_rotate = rotate
         self.image_viewer.set_tool('select_title')  # Re-using the selection tool logic
-        self.statusBar().showMessage(f"Select region for '{target_name}' by dragging the mouse. Right-click to cancel.", 5000)
+        self.statusBar().showMessage(f"Select region for '{target_name}' by dragging the mouse. Right-click to cancel.",
+                                     5000)
 
     def handle_region_ocr(self, bbox):
         """Generic slot to handle OCR on any manually selected region."""
@@ -1176,7 +1272,11 @@ class MainAppWindow(QMainWindow):
                 for i, series in enumerate(results_to_export['series_data']):
                     df = pd.DataFrame(series['data_points'])
                     series_name = series.get('series_name', f'series_{i + 1}')
-                    df.columns = [f'{series_name}_x', f'{series_name}_y']
+                    # --- FIX: Check for empty dataframe before assigning columns ---
+                    if df.empty:
+                        df = pd.DataFrame(columns=[f'{series_name}_x', f'{series_name}_y'])
+                    else:
+                        df.columns = [f'{series_name}_x', f'{series_name}_y']
                     all_dfs.append(df)
 
                 combined_df = pd.concat(all_dfs, axis=1)
@@ -1271,4 +1371,4 @@ class MainAppWindow(QMainWindow):
         self.show_masks_action.setChecked(False)
         self.mask_overlay_pixmap = None
         if clear_image_viewer_state:
-            self.image_viewer.set_image(QPixmap()) # Clear image viewer
+            self.image_viewer.set_image(QPixmap())  # Clear image viewer

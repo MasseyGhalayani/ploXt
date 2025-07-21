@@ -73,6 +73,7 @@ class SeriesEditorWidget(QGroupBox):
     ocrRequested = pyqtSignal()
     deleteStateChanged = pyqtSignal()
     nameChanged = pyqtSignal()
+    duplicateRequested = pyqtSignal()
 
     def __init__(self, series_name, color, original_index, parent=None):
         super().__init__(parent)
@@ -104,6 +105,14 @@ class SeriesEditorWidget(QGroupBox):
         self.ocr_btn.setFixedWidth(30)
         self.ocr_btn.clicked.connect(self.request_ocr)
 
+        self.duplicate_btn = QPushButton()
+        # Using a "new folder" icon as a stand-in for "copy" or "duplicate"
+        duplicate_icon = style.standardIcon(style.SP_FileDialogNewFolder)
+        self.duplicate_btn.setIcon(duplicate_icon)
+        self.duplicate_btn.setToolTip("Duplicate this series")
+        self.duplicate_btn.setFixedWidth(30)
+        self.duplicate_btn.clicked.connect(self.request_duplication)
+
         self.delete_icon = style.standardIcon(style.SP_TrashIcon)
         self.undelete_icon = style.standardIcon(style.SP_DialogResetButton)  # A "restore" icon
 
@@ -117,6 +126,7 @@ class SeriesEditorWidget(QGroupBox):
         header_layout.addWidget(self.name_label)
         header_layout.addWidget(self.name_edit)
         header_layout.addWidget(self.ocr_btn)
+        header_layout.addWidget(self.duplicate_btn)
         header_layout.addWidget(self.delete_btn)
         main_layout.addLayout(header_layout)
 
@@ -137,6 +147,9 @@ class SeriesEditorWidget(QGroupBox):
     def request_ocr(self):
         self.ocrRequested.emit()
 
+    def request_duplication(self):
+        self.duplicateRequested.emit()
+
     def toggle_deleted_state(self):
         """Toggles the deleted status of the series and updates the UI accordingly."""
         self.is_deleted = not self.is_deleted
@@ -147,13 +160,14 @@ class SeriesEditorWidget(QGroupBox):
             self.delete_btn.setIcon(self.undelete_icon)
             self.delete_btn.setToolTip("Restore this series")
             self.name_edit.setEnabled(False)
+            self.duplicate_btn.setEnabled(False)
         else:
             self.setTitle("")
             self.setStyleSheet("")  # Revert to default stylesheet
             self.delete_btn.setIcon(self.delete_icon)
             self.delete_btn.setToolTip("Delete this series")
             self.name_edit.setEnabled(True)
-
+            self.duplicate_btn.setEnabled(True)
 
 class OcrDebugWidget(QGroupBox):
     """
