@@ -59,8 +59,31 @@ class PdfWorker(QThread):
         extracted_charts = self.pdf_extractor.extract_charts_from_pdf(self.pdf_path)
         self.finished.emit(extracted_charts)
 
+class ModelInitWorker(QThread):
+    """Worker thread for the slow model initialization."""
+    # Signal: progress percentage, message
+    progress = pyqtSignal(int, str)
+    # Signal: ChartExtractor instance, PdfChartExtractor instance
+    finished = pyqtSignal(object, object)
+
+    def run(self):
+        """Initializes all heavy models."""
+        try:
+            self.progress.emit(10, "Loading line segmentation model...")
+            extractor = ChartExtractor()
+            self.progress.emit(60, "Loading PDF chart extractor...")
+            pdf_extractor = PdfChartExtractor()
+            self.progress.emit(100, "Initialization complete!")
+            self.finished.emit(extractor, pdf_extractor)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.progress.emit(100, f"Error: {e}")
+            self.finished.emit(None, None)
+
 
 class MainAppWindow(QMainWindow):
+    initialization_complete = pyqtSignal()
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PloXt Ver 1.0.1")
@@ -179,7 +202,10 @@ class MainAppWindow(QMainWindow):
         # Set initial state of controls
         self._update_postproc_controls_state()
 
-        self.init_models()
+        # Disable controls that require models until they are loaded
+        self.load_action.setEnabled(False)
+        self.load_pdf_action.setEnabled(False)
+
 
     def build_toolbar(self):
         toolbar = QToolBar("Main Toolbar")
@@ -356,12 +382,33 @@ class MainAppWindow(QMainWindow):
 
         layout.addWidget(scroll_area)
 
-    def init_models(self):
-        self.statusBar().showMessage("Loading models... Please wait.")
-        # --- NEW: Initialize both extractors ---
-        self.extractor = ChartExtractor()
-        self.pdf_extractor = PdfChartExtractor()
+    def start_model_initialization(self, splash):
+        """Starts the model loading in a background thread."""
+        self.model_worker = ModelInitWorker()
+        self.model_worker.progress.connect(splash.set_progress)
+        # A lambda is used to ignore the first argument (progress value)
+        self.model_worker.progress.connect(lambda val, msg: splash.set_message(msg))
+        self.model_worker.finished.connect(self.on_models_initialized)
+        self.model_worker.start()
+
+    def on_models_initialized(self, extractor, pdf_extractor):
+        """Slot to handle the completion of model loading."""
+        if extractor is None or pdf_extractor is None:
+            QMessageBox.critical(self, "Initialization Error",
+                                 "Failed to load critical models. The application may not function correctly. "
+                                 "Please check the console for errors and restart.")
+            # We still emit the signal to close the splash screen and show the (partially broken) window
+            self.initialization_complete.emit()
+            return
+
+        self.extractor = extractor
+        self.pdf_extractor = pdf_extractor
+
+        # Re-enable controls now that models are loaded
+        self.load_action.setEnabled(True)
+        self.load_pdf_action.setEnabled(True)
         self.statusBar().showMessage("Models loaded successfully.", 5000)
+        self.initialization_complete.emit()
 
     def load_image(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Image Files (*.png *.jpg *.jpeg)")
