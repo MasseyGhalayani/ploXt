@@ -63,7 +63,7 @@ class PdfWorker(QThread):
 class MainAppWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Chart Data Extractor Ver 1.0")
+        self.setWindowTitle("PloXt Ver 1.0.1")
         self.setGeometry(100, 100, 1600, 900)
         self.extractor = None
         self.current_results = None
