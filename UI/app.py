@@ -528,6 +528,7 @@ class MainAppWindow(QMainWindow):
             self.postprocessing_tab.apply_postprocessing_btn.setEnabled(True)
             # Clear the plot with default linear scale until user interacts.
             self.postprocessing_tab.postproc_canvas.update_plot([], [], x_scale='linear', y_scale='linear')
+            self._display_current_postproc_state()
         else:
             # On failure, the OCR debug tab is still populated, so we just show the error.
             self.correct_ticks_action.setEnabled(False)
@@ -692,9 +693,8 @@ class MainAppWindow(QMainWindow):
         recalculation_needed = ticks_changed_by_position or ticks_changed_by_value
         if not recalculation_needed:
             # --- PATH A: Metadata-only update. No data recalculation needed. ---
-            if not titles_changed:
-                if not series_changed:
-                    self.statusBar().showMessage("No changes to apply.", 3000)
+            if not titles_changed and not series_changed:
+                self.statusBar().showMessage("No changes to apply.", 3000)
                 return
 
             print("--- Applying metadata-only corrections (titles) ---")
@@ -710,6 +710,21 @@ class MainAppWindow(QMainWindow):
             self.current_results['ocr_data']['x_axis_title']['text'] = corrected_x_title
             self.current_results['ocr_data']['y_axis_title']['text'] = corrected_y_title
 
+            # Update series names in current_results and processed_results
+            for series in self.current_results.get('series_data', []):
+                widget = next((w for w in self.series_widgets if w.original_index == series.get('original_index')), None)
+                if widget:
+                    series['series_name'] = widget.get_series_name()
+                    series['is_deleted'] = widget.is_deleted
+
+            if self.processed_results:
+                for series in self.processed_results.get('series_data', []):
+                    widget = next((w for w in self.series_widgets if w.original_index == series.get('original_index')), None)
+                    if widget:
+                        series['series_name'] = widget.get_series_name()
+                        series['is_deleted'] = widget.is_deleted
+
+            self._update_postproc_combo_box()
             self._update_all_views()
             self.statusBar().showMessage("Chart titles updated successfully.", 5000)
             return
