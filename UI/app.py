@@ -70,12 +70,16 @@ class ModelInitWorker(QThread):
     def run(self):
         """Initializes all heavy models."""
         try:
-            self.progress.emit(10, "Loading line segmentation model...")
-            extractor = ChartExtractor()
-            self.progress.emit(60, "Loading PDF chart extractor...")
-            pdf_extractor = PdfChartExtractor()
+            self.progress.emit(10, "Starting model initialization...")
+            # Pass the worker's progress signal to the constructors
+            extractor = ChartExtractor(progress_callback=self.progress)
+
+            self.progress.emit(70, "Initializing PDF chart extractor...")
+            pdf_extractor = PdfChartExtractor(progress_callback=self.progress)
+
             self.progress.emit(100, "Initialization complete!")
             self.finished.emit(extractor, pdf_extractor)
+
         except Exception as e:
             import traceback
             traceback.print_exc()

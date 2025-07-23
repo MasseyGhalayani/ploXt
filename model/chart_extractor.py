@@ -31,7 +31,7 @@ class ChartExtractor:
     """
 
     def __init__(self, yolo_model_path=None, line_model_config=None,
-                 line_model_ckpt=None, device="cuda"):
+                 line_model_ckpt=None, device="cuda", progress_callback=None):
         """
         Initializes the ChartExtractor by loading all required models.
         """
@@ -47,14 +47,20 @@ class ChartExtractor:
             line_model_ckpt = script_dir / "iter_3000.pth"
 
         # 1. Load Line Segmentation Model
+        if progress_callback:
+            progress_callback.emit(25, "Loading line segmentation model...")
         print(f"Loading line segmentation model from config: {line_model_config}")
         infer.load_model(str(line_model_config), str(line_model_ckpt), device)
 
         # 2. Load YOLO Model
+        if progress_callback:
+            progress_callback.emit(40, "Loading plot detection model (YOLO)...")
         print(f"Loading YOLO model from: {yolo_model_path}")
         self.yolo_model = YOLO(yolo_model_path)
 
         # 3. Load OCR Reader
+        if progress_callback:
+            progress_callback.emit(55, "Initializing text recognition model (EasyOCR)...")
         print("Initializing EasyOCR reader...")
         self.ocr_reader = easyocr.Reader(['en'], gpu=(device == "cuda"))
         print("--- Chart Extractor Initialized Successfully ---")

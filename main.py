@@ -1,11 +1,10 @@
-# main_gui.py
+# main.py
 import sys
 
 from PyQt5.QtWidgets import QApplication
 
 # --- NEW: Import the splash screen and main window ---
 from UI.splash_screen import SplashScreen
-from UI.app import MainAppWindow
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
@@ -16,6 +15,9 @@ if __name__ == '__main__':
 
     # Process events to make sure the splash screen is drawn before heavy lifting
     app.processEvents()
+
+    # Move the heavy import here, after the splash is visible
+    from UI.app import MainAppWindow
 
     # 2. Create the main window (it's not shown yet)
     window = MainAppWindow()

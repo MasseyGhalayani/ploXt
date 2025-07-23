@@ -10,7 +10,7 @@ class PdfChartExtractor:
     """
     A class to find and extract chart images from PDF files.
     """
-    def __init__(self, yolo_model_path=None, device="cuda"):
+    def __init__(self, yolo_model_path=None, device="cuda", progress_callback=None):
         """
         Initializes the extractor by loading the YOLO model.
         """
@@ -19,6 +19,8 @@ class PdfChartExtractor:
         if yolo_model_path is None:
             yolo_model_path = script_dir / "yoloPlotInfoDetector.pt"
 
+        if progress_callback:
+            progress_callback.emit(75, "Loading PDF chart detection model...")
         print(f"Loading YOLO model from: {yolo_model_path}")
         self.yolo_model = YOLO(yolo_model_path)
         self.names = self.yolo_model.names
