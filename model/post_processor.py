@@ -103,11 +103,11 @@ class PostProcessor:
         return inlier_points
 
     @staticmethod
-    def remove_outliers_ransac(points, threshold_multiplier=3.0, x_scale='linear', y_scale='linear'):
+    def remove_outliers_ransac(points, x_scale='linear', y_scale='linear'):
         """
         Removes outliers using the RANSAC algorithm. It fits a robust polynomial
         model and removes points that are not considered inliers.
-        --- NEW: A powerful alternative for outlier detection. ---
+        --- REVERTED: Now uses a robust polynomial fit instead of a random forest. ---
         """
         if not SKLEARN_AVAILABLE:
             print("Warning: scikit-learn not found. RANSAC outlier removal is unavailable. Skipping.")
@@ -135,31 +135,41 @@ class PostProcessor:
 
         x_reg_reshaped = x_reg.reshape(-1, 1)
 
-        # --- IMPROVED: Calculate a dynamic, trend-aware threshold ---
-        # The old method based the threshold on the global Y-spread, which was often too large.
-        # This new method finds the noise level *around the data's trend*.
+        # --- FIX: Manually calculate a robust threshold based on residuals ---
+        # The default `residual_threshold=None` in scikit-learn calculates the MAD
+        # on the target values `y`, which is not suitable for data with a trend.
+        # It results in a threshold that is too large and fails to remove outliers.
+        # We will calculate the MAD on the *residuals* of a preliminary fit, which
+        # is a much better estimate of the noise level around the trend.
         try:
-            # 1. Fit a non-robust quadratic to get the basic trend of the data.
+            # 1. Fit a non-robust model to get the general trend.
             p_coeffs = np.polyfit(x_reg, y_reg, 2)
             p = np.poly1d(p_coeffs)
             # 2. Calculate the residuals (errors) from this trendline.
             residuals = y_reg - p(x_reg)
-            # 3. Calculate the Median Absolute Deviation (MAD) of the residuals.
-            # This is a robust measure of the data's "noisiness" or "thickness".
+            # 3. Calculate the MAD of the residuals. This is a robust measure of noise.
             residual_mad = np.median(np.abs(residuals - np.median(residuals)))
-            # Use this more accurate, trend-independent measure for the threshold.
-            dynamic_threshold = residual_mad * threshold_multiplier
+            # 4. Set the threshold. A threshold of 3.0 * MAD is a common choice.
+            robust_threshold = 3.0 * residual_mad
         except (np.linalg.LinAlgError, ValueError):
-            # Fallback to the old method if the initial polyfit fails
-            dynamic_threshold = np.median(np.abs(y_reg - np.median(y_reg))) * threshold_multiplier
+            # Fallback if the initial fit fails
+            robust_threshold = np.median(np.abs(y_reg - np.median(y_reg)))
 
-        model = make_pipeline(PolynomialFeatures(2), RANSACRegressor(
-            residual_threshold=dynamic_threshold, random_state=42))
+
+        model = make_pipeline(PolynomialFeatures(2), RANSACRegressor(residual_threshold=robust_threshold,
+                                                                    random_state=42))
 
         try:
             model.fit(x_reg_reshaped, y_reg)
+            # When using a pipeline, the RANSAC estimator instance is named 'ransacregressor'
             inlier_mask = model.named_steps['ransacregressor'].inlier_mask_
-        except ValueError:
+        except Exception as e:
+            print(f"RANSAC fitting failed: {e}")
+            import traceback
+            traceback.print_exc()
+            inlier_mask = np.zeros(len(points), dtype=bool) # Mark all as outliers if fitting fails
+
+        if not np.any(inlier_mask): # If no inliers found, return original points
             # RANSAC can fail if it can't find a consensus. Fallback gracefully.
             print("Warning: RANSAC failed to find a valid consensus set. Returning original points.")
             return points
@@ -257,7 +267,7 @@ class PostProcessor:
             if params.get('outlier_removal_enabled', False) and not params.get('manual_editing_enabled', False):
                 threshold = params.get('outlier_threshold', 3.0) # Used by both methods
                 if outlier_method == 'ransac':
-                    points = PostProcessor.remove_outliers_ransac(points, threshold, x_scale, y_scale)
+                    points = PostProcessor.remove_outliers_ransac(points, x_scale, y_scale)
                 else: # Default to local regression
                     window_fraction = params.get('outlier_window_fraction', 0.15)
                     points = PostProcessor.remove_outliers_local_regression(points, window_fraction, threshold, x_scale, y_scale)
