@@ -91,7 +91,7 @@ class MainAppWindow(QMainWindow):
     initialization_complete = pyqtSignal()
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PloXt Ver 1.0.1")
+        self.setWindowTitle("PloXt Ver 1.0.2")
 
         # --- NEW: Set Application Icon ---
         script_dir = Path(__file__).parent.resolve()
