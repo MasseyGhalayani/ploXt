@@ -1180,7 +1180,6 @@ class MainAppWindow(QMainWindow):
     def toggle_outlier_controls(self, checked):
         """Enables/disables the child controls of the outlier group."""
         self.postprocessing_tab.outlier_method_combo.setEnabled(checked)
-        self.postprocessing_tab.outlier_threshold_spin.setEnabled(checked)
         # Also handle the method-specific controls
         self.handle_outlier_method_change(self.postprocessing_tab.outlier_method_combo.currentText())
         self._run_postprocessing_preview()
@@ -1192,6 +1191,10 @@ class MainAppWindow(QMainWindow):
         self.postprocessing_tab.outlier_window_spin.setVisible(is_local_regression)
         self.postprocessing_tab.outlier_window_label.setVisible(is_local_regression)
         self.postprocessing_tab.outlier_window_spin.setEnabled(is_local_regression and is_enabled)
+        # The threshold parameter is NOT used by the automatic RANSAC method.
+        # It is only used by Local Regression.
+        is_ransac = (method_text == "RANSAC")
+        self.postprocessing_tab.outlier_threshold_spin.setEnabled(not is_ransac and is_enabled)
 
     def handle_interactive_plot_changed(self, points):
         """Handles updates from the interactive plot when points are moved."""
