@@ -11,7 +11,7 @@ a = Analysis(
         ('mmdetection', 'mmdetection'),
         # --- FIX: This copies your model folder, including configs and weights ---
         ('model', 'model'),
-        ('UI/resources/app_icon.png', './UI/resources')
+        ('UI/resources/', './UI/resources')
     ],
     hiddenimports=[
         # This explicitly tells PyInstaller to find the missing extension.

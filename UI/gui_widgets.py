@@ -437,8 +437,7 @@ class CorrectionTab(QWidget):
         self.interpolation_combo.addItems(["Linear", "Cubic Spline", "None (Raw Points)"])
         interpolation_layout.addRow("Interpolation Method:", self.interpolation_combo)
 
-        self.apply_corrections_btn = QPushButton(" Apply All Corrections & Update Plot")
-        self.apply_corrections_btn.setIcon(self.style().standardIcon(self.style().SP_DialogApplyButton))
+        self.apply_corrections_btn = QPushButton("Apply All Corrections & Update Plot")
         self.apply_corrections_btn.setEnabled(False)
 
         layout.addWidget(ocr_group)
