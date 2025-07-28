@@ -201,7 +201,7 @@ class MainAppWindow(QMainWindow):
         self.postprocessing_tab.manual_final_points_spin.valueChanged.connect(self._run_postprocessing_preview)
         self.postprocessing_tab.manual_interp_method_combo.currentTextChanged.connect(self._run_postprocessing_preview)
         # View options
-        self.postprocessing_tab.show_original_check.toggled.connect(self._display_current_postproc_state)
+        self.postprocessing_tab.show_original_check.toggled.connect(self._run_postprocessing_preview)
 
         self.correction_tab.plot_title_ocr_btn.clicked.connect(
             lambda: self.start_ocr_selection(self.correction_tab.plot_title_edit, "Plot Title", rotate=False))
@@ -990,7 +990,18 @@ class MainAppWindow(QMainWindow):
         # --- NEW: Handle showing original data overlay ---
         original_data_to_show = None
         if self.postprocessing_tab.show_original_check.isChecked():
-            original_data_to_show = active_series
+            # --- FIX: The overlay should always show the data before ANY post-processing. ---
+            # The previous logic (`original_data_to_show = active_series`) was incorrect because
+            # `active_series` is derived from `source_data`, which could be `processed_results`.
+            # This meant the overlay was showing an already-processed state, not the true original.
+            # The correct approach is to always get the overlay data from `self.current_results`.
+            if self.current_results:
+                original_series_all = [s for s in self.current_results['series_data'] if not s.get('is_deleted', False)]
+                if selected_series_name == "All Series":
+                    original_data_to_show = original_series_all
+                else:
+                    original_data_to_show = [s for s in original_series_all if s['series_name'] == selected_series_name]
+
 
         # Update the plot with the temporary result and optional original data
         self.postprocessing_tab.postproc_canvas.update_plot(
