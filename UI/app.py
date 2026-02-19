@@ -523,6 +523,9 @@ class MainAppWindow(QMainWindow):
                 self.ocr_blur_spinbox.setValue(self.best_ocr_params.get('blur_ksize', 5))
                 self.ocr_margin_spinbox.setValue(self.best_ocr_params.get('margin', 2))
 
+            # --- NEW: Calculate and store plot_extent ---
+            self._calculate_and_store_plot_extent(result)
+
             self.populate_correction_fields(result)
             self._update_postproc_combo_box()  # Centralized update
             self._update_all_views()  # Central update
@@ -797,6 +800,9 @@ class MainAppWindow(QMainWindow):
             self.current_results['y_scale_type'] = recalculated.get('y_scale_type')
             self.current_results['ocr_data'] = corrected_ocr
 
+            # --- NEW: Recalculate plot_extent after tick corrections ---
+            self._calculate_and_store_plot_extent(self.current_results)
+
             self._update_postproc_combo_box()
             self._update_all_views()
             if was_processed:
@@ -806,11 +812,60 @@ class MainAppWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Recalculation Error", recalculated['message'])
 
+    def _calculate_and_store_plot_extent(self, result):
+        """
+        Calculates the plot extent from tick positions and stores it in the result.
+        This extent represents the full plot area in data coordinates.
+        """
+        ocr_data = result.get('ocr_data', {})
+        plot_area_bbox = ocr_data.get('plot_area_bbox')
+
+        if plot_area_bbox is None:
+            print("Warning: No plot_area_bbox available, cannot calculate plot_extent")
+            return
+
+        x_ticks = [t for t in ocr_data.get('ticks', []) if t.get('axis') == 'x']
+        y_ticks = [t for t in ocr_data.get('ticks', []) if t.get('axis') == 'y']
+
+        if len(x_ticks) < 2 or len(y_ticks) < 2:
+            print("Warning: Not enough ticks to calculate plot_extent")
+            return
+
+        try:
+            x1_pixel, y1_pixel, x2_pixel, y2_pixel = plot_area_bbox
+
+            # X-axis calibration
+            x_pixels = np.array([t['pixel_x'] for t in x_ticks])
+            x_values = np.array([t['value'] for t in x_ticks])
+            x_m, x_c = np.polyfit(x_pixels, x_values, 1)
+
+            # Y-axis calibration
+            y_pixels = np.array([t['pixel_y'] for t in y_ticks])
+            y_values = np.array([t['value'] for t in y_ticks])
+            y_m, y_c = np.polyfit(y_pixels, y_values, 1)
+
+            # Calculate data coordinates for the FULL plot area bbox
+            x_min_data = x_m * x1_pixel + x_c
+            x_max_data = x_m * x2_pixel + x_c
+
+            # For Y-axis: image Y increases downward, data Y increases upward
+            y_min_data = y_m * y2_pixel + y_c  # bottom of plot (larger pixel Y)
+            y_max_data = y_m * y1_pixel + y_c  # top of plot (smaller pixel Y)
+
+            plot_extent = [x_min_data, x_max_data, y_min_data, y_max_data]
+
+            # Store in current_results
+            result['plot_extent'] = plot_extent
+
+            print(f"Calculated plot_extent: {plot_extent}")
+
+        except Exception as e:
+            print(f"Error calculating plot_extent: {e}")
+
     def _recreate_plot_with_overlay(self, extraction_result, original_image_np=None):
         """
         Generates a plot with optional original image overlay.
-        Uses tick positions as calibration points to properly scale the image.
-        Also stores the calculated extent for use in other views.
+        Uses pre-calculated plot_extent from extraction_result.
         """
         if not extraction_result or not extraction_result.get('series_data'):
             return None
@@ -818,6 +873,9 @@ class MainAppWindow(QMainWindow):
         # Get axis information
         ocr_data = self.current_results.get('ocr_data', {}) if self.current_results else {}
         plot_area_bbox = ocr_data.get('plot_area_bbox')
+
+        # Get pre-calculated plot extent
+        plot_extent = extraction_result.get('plot_extent')
 
         # Create figure
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -829,70 +887,24 @@ class MainAppWindow(QMainWindow):
         ax.set_xscale(extraction_result.get('x_scale_type', 'linear'))
         ax.set_yscale(extraction_result.get('y_scale_type', 'linear'))
 
-        # Default extent (will be updated if we have tick data)
-        plot_extent = None
-
-        # Overlay original image if provided
-        if original_image_np is not None and plot_area_bbox is not None:
+        # Overlay original image if provided and extent is available
+        if original_image_np is not None and plot_area_bbox is not None and plot_extent is not None:
             original_rgb = cv2.cvtColor(original_image_np, cv2.COLOR_BGR2RGB)
             x1_pixel, y1_pixel, x2_pixel, y2_pixel = plot_area_bbox
             plot_area_img = original_rgb[int(y1_pixel):int(y2_pixel), int(x1_pixel):int(x2_pixel)]
 
-            x_ticks = [t for t in ocr_data.get('ticks', []) if t.get('axis') == 'x']
-            y_ticks = [t for t in ocr_data.get('ticks', []) if t.get('axis') == 'y']
+            ax.imshow(plot_area_img,
+                      extent=plot_extent,
+                      aspect='auto',
+                      alpha=0.3,
+                      zorder=0,
+                      interpolation='bilinear',
+                      origin='upper')
 
-            if len(x_ticks) >= 2 and len(y_ticks) >= 2:
-                x_pixels = np.array([t['pixel_x'] for t in x_ticks])
-                x_values = np.array([t['value'] for t in x_ticks])
-                x_m, x_c = np.polyfit(x_pixels, x_values, 1)
-
-                y_pixels = np.array([t['pixel_y'] for t in y_ticks])
-                y_values = np.array([t['value'] for t in y_ticks])
-                y_m, y_c = np.polyfit(y_pixels, y_values, 1)
-
-                x_min_data = x_m * x1_pixel + x_c
-                x_max_data = x_m * x2_pixel + x_c
-                y_min_data = y_m * y2_pixel + y_c
-                y_max_data = y_m * y1_pixel + y_c
-
-                # Store the extent for use in post-processing
-                plot_extent = [x_min_data, x_max_data, y_min_data, y_max_data]
-
-                ax.imshow(plot_area_img,
-                          extent=plot_extent,
-                          aspect='auto',
-                          alpha=0.3,
-                          zorder=0,
-                          interpolation='bilinear',
-                          origin='upper')
-
-        # --- NEW: Calculate and store extent even without overlay ---
-        elif plot_area_bbox is not None:
-            ocr_data = self.current_results.get('ocr_data', {}) if self.current_results else {}
-            x_ticks = [t for t in ocr_data.get('ticks', []) if t.get('axis') == 'x']
-            y_ticks = [t for t in ocr_data.get('ticks', []) if t.get('axis') == 'y']
-
-            if len(x_ticks) >= 2 and len(y_ticks) >= 2:
-                x1_pixel, y1_pixel, x2_pixel, y2_pixel = plot_area_bbox
-
-                x_pixels = np.array([t['pixel_x'] for t in x_ticks])
-                x_values = np.array([t['value'] for t in x_ticks])
-                x_m, x_c = np.polyfit(x_pixels, x_values, 1)
-
-                y_pixels = np.array([t['pixel_y'] for t in y_ticks])
-                y_values = np.array([t['value'] for t in y_ticks])
-                y_m, y_c = np.polyfit(y_pixels, y_values, 1)
-
-                x_min_data = x_m * x1_pixel + x_c
-                x_max_data = x_m * x2_pixel + x_c
-                y_min_data = y_m * y2_pixel + y_c
-                y_max_data = y_m * y1_pixel + y_c
-
-                plot_extent = [x_min_data, x_max_data, y_min_data, y_max_data]
-
-        # Store extent in the extraction result for later use
+        # Apply the plot extent to set axis limits (even without overlay)
         if plot_extent:
-            extraction_result['plot_extent'] = plot_extent
+            ax.set_xlim(plot_extent[0], plot_extent[1])
+            ax.set_ylim(plot_extent[2], plot_extent[3])
 
         # Plot the data series
         plot_colors = extraction_result.get('colors')
@@ -1135,6 +1147,9 @@ class MainAppWindow(QMainWindow):
                     original_data_to_show = [s for s in original_series_all if s['series_name'] == selected_series_name]
 
 
+        # --- NEW: Set the results_data reference so the canvas can access plot_extent ---
+        self.postprocessing_tab.postproc_canvas.results_data = source_data
+
         # Update the plot with the temporary result and optional original data
         self.postprocessing_tab.postproc_canvas.update_plot(
             processed_preview, self.SERIES_COLORS,
@@ -1182,6 +1197,9 @@ class MainAppWindow(QMainWindow):
                 original_series_to_show = original_series_all
             else:
                 original_series_to_show = [s for s in original_series_all if s['series_name'] == selected_series_name]
+
+        # --- NEW: Set the results_data reference ---
+        self.postprocessing_tab.postproc_canvas.results_data = source_data
 
         self.postprocessing_tab.postproc_canvas.update_plot(
             series_to_plot, self.SERIES_COLORS,

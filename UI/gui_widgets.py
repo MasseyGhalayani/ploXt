@@ -251,6 +251,8 @@ class InteractivePlotCanvas(FigureCanvas):
         # --- NEW: Add state for dragging ---
         self.dragged_point_index = None
 
+        self.results_data = None  # Will be set by parent
+
         # --- MODIFIED: Connect more events for dragging ---
         self.fig.canvas.mpl_connect('button_press_event', self.on_press)
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_motion)
@@ -258,6 +260,7 @@ class InteractivePlotCanvas(FigureCanvas):
 
     def update_plot(self, processed_series, colors, original_series=None, interactive_mode=False,
                     x_scale='linear', y_scale='linear'):
+        print("Updating plot in InteractivePlotCanvas")
         self.axes.clear()
 
         # --- NEW: Set axis scales before plotting ---
@@ -318,6 +321,13 @@ class InteractivePlotCanvas(FigureCanvas):
                     self.interactive_scatter = self.axes.scatter(x_scatter, y_scatter, color='red', s=50, zorder=5, label='Interactive Points')
             else:
                 self.axes.plot(x_line, y_line, color=color.name(QColor.HexRgb), label=series['series_name'])
+
+            # --- NEW: Apply fixed extent if available from results_data ---
+        if self.results_data and self.results_data.get('plot_extent'):
+            plot_extent = self.results_data['plot_extent']
+            self.axes.set_xlim(plot_extent[0], plot_extent[1])
+            self.axes.set_ylim(plot_extent[2], plot_extent[3])
+            print(f"Applying plot extent: X=[{plot_extent[0]}, {plot_extent[1]}], Y=[{plot_extent[2]}, {plot_extent[3]}]")
 
         # Final plot styling
         self.axes.minorticks_on()
