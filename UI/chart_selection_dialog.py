@@ -5,7 +5,6 @@ from PyQt5.QtWidgets import (QDialog, QScrollArea, QWidget, QGridLayout,
 from PyQt5.QtGui import QIcon, QPixmap, QImage
 from PyQt5.QtCore import pyqtSignal, QSize, Qt
 import cv2
-import numpy as np
 
 class ChartSelectionDialog(QDialog):
     """

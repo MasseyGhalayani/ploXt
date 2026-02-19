@@ -594,10 +594,20 @@ class SaveTab(QWidget):
         self.export_csv_btn.setEnabled(False)
         self.export_mat_btn.setEnabled(False)
 
+
 class ResultsTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
+
+        # Add checkbox to toggle overlay
+        controls_layout = QHBoxLayout()
+        self.show_overlay_check = QCheckBox("Show Original Image Overlay")
+        self.show_overlay_check.setToolTip("Overlay the original chart image under the recreated plot")
+        controls_layout.addWidget(self.show_overlay_check)
+        controls_layout.addStretch()
+        layout.addLayout(controls_layout)
+
         self.plot_label = QLabel("Recreated plot will appear here.")
         self.plot_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.plot_label)

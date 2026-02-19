@@ -21,6 +21,10 @@ from .gui_widgets import (SeriesEditorWidget, OcrDebugWidget, InteractivePlotCan
                           CorrectionTab, PostProcessingTab, SaveTab, ResultsTab)
 from .chart_selection_dialog import ChartSelectionDialog
 
+import matplotlib.pyplot as plt
+import io
+from PIL import Image
+
 # Try to import scipy for .mat export, handle if not found
 try:
     from scipy.io import savemat
@@ -219,6 +223,7 @@ class MainAppWindow(QMainWindow):
         # Disable controls that require models until they are loaded
         self.load_action.setEnabled(False)
         self.load_pdf_action.setEnabled(False)
+        self.results_tab.show_overlay_check.toggled.connect(lambda: self._update_all_views())
 
 
     def build_toolbar(self):
@@ -801,13 +806,140 @@ class MainAppWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Recalculation Error", recalculated['message'])
 
+    def _recreate_plot_with_overlay(self, extraction_result, original_image_np=None):
+        """
+        Generates a plot with optional original image overlay.
+        Uses tick positions as calibration points to properly scale the image.
+        Also stores the calculated extent for use in other views.
+        """
+        if not extraction_result or not extraction_result.get('series_data'):
+            return None
+
+        # Get axis information
+        ocr_data = self.current_results.get('ocr_data', {}) if self.current_results else {}
+        plot_area_bbox = ocr_data.get('plot_area_bbox')
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(8, 5))
+        if original_image_np is not None:
+            fig.patch.set_alpha(0.0)
+            ax.patch.set_alpha(0.0)
+
+        # Set axis scales
+        ax.set_xscale(extraction_result.get('x_scale_type', 'linear'))
+        ax.set_yscale(extraction_result.get('y_scale_type', 'linear'))
+
+        # Default extent (will be updated if we have tick data)
+        plot_extent = None
+
+        # Overlay original image if provided
+        if original_image_np is not None and plot_area_bbox is not None:
+            original_rgb = cv2.cvtColor(original_image_np, cv2.COLOR_BGR2RGB)
+            x1_pixel, y1_pixel, x2_pixel, y2_pixel = plot_area_bbox
+            plot_area_img = original_rgb[int(y1_pixel):int(y2_pixel), int(x1_pixel):int(x2_pixel)]
+
+            x_ticks = [t for t in ocr_data.get('ticks', []) if t.get('axis') == 'x']
+            y_ticks = [t for t in ocr_data.get('ticks', []) if t.get('axis') == 'y']
+
+            if len(x_ticks) >= 2 and len(y_ticks) >= 2:
+                x_pixels = np.array([t['pixel_x'] for t in x_ticks])
+                x_values = np.array([t['value'] for t in x_ticks])
+                x_m, x_c = np.polyfit(x_pixels, x_values, 1)
+
+                y_pixels = np.array([t['pixel_y'] for t in y_ticks])
+                y_values = np.array([t['value'] for t in y_ticks])
+                y_m, y_c = np.polyfit(y_pixels, y_values, 1)
+
+                x_min_data = x_m * x1_pixel + x_c
+                x_max_data = x_m * x2_pixel + x_c
+                y_min_data = y_m * y2_pixel + y_c
+                y_max_data = y_m * y1_pixel + y_c
+
+                # Store the extent for use in post-processing
+                plot_extent = [x_min_data, x_max_data, y_min_data, y_max_data]
+
+                ax.imshow(plot_area_img,
+                          extent=plot_extent,
+                          aspect='auto',
+                          alpha=0.3,
+                          zorder=0,
+                          interpolation='bilinear',
+                          origin='upper')
+
+        # --- NEW: Calculate and store extent even without overlay ---
+        elif plot_area_bbox is not None:
+            ocr_data = self.current_results.get('ocr_data', {}) if self.current_results else {}
+            x_ticks = [t for t in ocr_data.get('ticks', []) if t.get('axis') == 'x']
+            y_ticks = [t for t in ocr_data.get('ticks', []) if t.get('axis') == 'y']
+
+            if len(x_ticks) >= 2 and len(y_ticks) >= 2:
+                x1_pixel, y1_pixel, x2_pixel, y2_pixel = plot_area_bbox
+
+                x_pixels = np.array([t['pixel_x'] for t in x_ticks])
+                x_values = np.array([t['value'] for t in x_ticks])
+                x_m, x_c = np.polyfit(x_pixels, x_values, 1)
+
+                y_pixels = np.array([t['pixel_y'] for t in y_ticks])
+                y_values = np.array([t['value'] for t in y_ticks])
+                y_m, y_c = np.polyfit(y_pixels, y_values, 1)
+
+                x_min_data = x_m * x1_pixel + x_c
+                x_max_data = x_m * x2_pixel + x_c
+                y_min_data = y_m * y2_pixel + y_c
+                y_max_data = y_m * y1_pixel + y_c
+
+                plot_extent = [x_min_data, x_max_data, y_min_data, y_max_data]
+
+        # Store extent in the extraction result for later use
+        if plot_extent:
+            extraction_result['plot_extent'] = plot_extent
+
+        # Plot the data series
+        plot_colors = extraction_result.get('colors')
+        for i, series in enumerate(extraction_result['series_data']):
+            df = pd.DataFrame(series['data_points'])
+            if not df.empty:
+                original_index = series.get('original_index', i)
+                color = plot_colors[original_index % len(plot_colors)] if plot_colors else None
+                ax.plot(df['x'], df['y'], linestyle='-', linewidth=2,
+                        label=series.get('series_name', 'series'), color=color, zorder=2)
+
+        ax.set_xlabel(extraction_result['x_axis_title'])
+        ax.set_ylabel(extraction_result['y_axis_title'])
+        ax.set_title(extraction_result.get('plot_title', 'Recreated Plot from Extracted Data'))
+        ax.legend()
+        ax.grid(True, which='both', linestyle='--', linewidth='0.5', alpha=0.7, zorder=1)
+
+        # Convert to numpy array
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+        plt.close(fig)
+        buf.seek(0)
+        plot_img_pil = Image.open(buf)
+        return cv2.cvtColor(np.array(plot_img_pil), cv2.COLOR_RGBA2BGRA)
+
     def update_plot(self, result, target_label=None):
-        # --- FIX: Add the shared colors to the result dictionary before plotting ---
+        """
+        Updates the plot display, optionally with the original image as an underlay.
+        """
+        # Get the original image if overlay is requested
+        show_overlay = self.results_tab.show_overlay_check.isChecked()
+        original_image = None
+
+        if show_overlay:
+            original_image = self.image_viewer.get_edited_image_as_numpy()
+
+        # Add colors to result
         plot_colors = [color.name(QColor.HexRgb) for color in self.SERIES_COLORS]
         result_with_colors = result.copy()
         result_with_colors['colors'] = plot_colors
 
-        plot_image_np = self.extractor._recreate_plot_image(result_with_colors)
+        # Generate plot with optional overlay
+        plot_image_np = self._recreate_plot_with_overlay(
+            result_with_colors,
+            original_image if show_overlay else None
+        )
+
         if plot_image_np is not None:
             h, w, ch = plot_image_np.shape
             q_img = QImage(plot_image_np.data, w, h, ch * w, QImage.Format_ARGB32)
