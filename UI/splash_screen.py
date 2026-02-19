@@ -16,6 +16,11 @@ class SplashScreen(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
 
+        # --- Author Label ---
+        author_label = QLabel("by Massey Ghalayani")
+        author_label.setAlignment(Qt.AlignRight)
+        author_label.setStyleSheet("color: #888; font-size: 8pt; padding-top: 5px;")
+
         # --- NEW: Header with Icon and Title ---
         header_layout = QHBoxLayout()
         header_layout.setAlignment(Qt.AlignCenter)
@@ -57,6 +62,7 @@ class SplashScreen(QWidget):
         layout.addStretch()
         layout.addWidget(self.message_label)
         layout.addWidget(self.progress_bar)
+        layout.addWidget(author_label)  # <-- ADD THIS LINE
 
     def set_progress(self, value):
         self.progress_bar.setValue(value)

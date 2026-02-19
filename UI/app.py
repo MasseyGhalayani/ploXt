@@ -24,6 +24,7 @@ from .chart_selection_dialog import ChartSelectionDialog
 import matplotlib.pyplot as plt
 import io
 from PIL import Image
+import torch
 
 # Try to import scipy for .mat export, handle if not found
 try:
@@ -95,7 +96,7 @@ class MainAppWindow(QMainWindow):
     initialization_complete = pyqtSignal()
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PloXt Ver 1.0.2")
+        self.setWindowTitle("PloXt Ver 1.0.3")
 
         # --- NEW: Set Application Icon ---
         script_dir = Path(__file__).parent.resolve()
@@ -104,6 +105,18 @@ class MainAppWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon_path)))
         else:
             print(f"Warning: Application icon not found at '{icon_path}'. Please create it.")
+
+        # --- CUDA Check ---
+        try:
+            if not torch.cuda.is_available():
+                QMessageBox.warning(self, "Performance Warning",
+                                    "CUDA is not available on your system.\n\n"
+                                    "The models used in this application are computationally intensive. "
+                                    "You may experience slow performance without a compatible GPU.")
+        except ImportError:
+            print("Warning: PyTorch not found. Cannot check for CUDA availability.")
+        except Exception as e:
+            print(f"An error occurred while checking for CUDA: {e}")
 
         self.setGeometry(100, 100, 1600, 900)
         self.extractor = None
