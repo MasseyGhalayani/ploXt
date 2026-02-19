@@ -218,6 +218,122 @@ class ChartExtractor:
         return best_params
 
     @staticmethod
+    def _filter_spatially_inconsistent_ticks(ticks, axis='x'):
+        """
+        Intelligently removes ticks whose values are inconsistent with their pixel positions
+        by analyzing the entire axis relationship (linear or logarithmic).
+
+        Strategy:
+        1. Sort ticks by pixel position
+        2. Detect if the relationship is linear or logarithmic
+        3. Fit a model (linear regression or log regression) to pixel->value mapping
+        4. Remove ticks that deviate significantly from the expected relationship
+
+        Returns filtered list of ticks.
+        """
+        if len(ticks) < 3:
+            return ticks  # Need at least 3 to detect outliers
+
+        pixel_key = 'pixel_x' if axis == 'x' else 'pixel_y'
+
+        # Sort by pixel position
+        sorted_ticks = sorted(ticks, key=lambda t: t[pixel_key])
+
+        pixels = np.array([t[pixel_key] for t in sorted_ticks])
+        values = np.array([t['value'] for t in sorted_ticks])
+
+        # First pass: detect if relationship is linear or logarithmic
+        # by checking if pixel spacing correlates better with value spacing or log(value) spacing
+
+        def calculate_correlation_score(pixels, transformed_values):
+            """Calculate how well pixel differences correlate with value differences"""
+            if len(pixels) < 3:
+                return 0
+            try:
+                # Use correlation coefficient between pixel positions and transformed values
+                correlation = np.corrcoef(pixels, transformed_values)[0, 1]
+                return abs(correlation) if np.isfinite(correlation) else 0
+            except:
+                return 0
+
+        # Test linear relationship
+        linear_score = calculate_correlation_score(pixels, values)
+
+        # Test logarithmic relationship (only if all values are positive)
+        log_score = 0
+        if np.all(values > 0):
+            log_values = np.log10(values)
+            log_score = calculate_correlation_score(pixels, log_values)
+
+        # Determine which model to use
+        use_log_model = log_score > linear_score and log_score > 0.9
+
+        print(f"  - {axis}-axis spatial analysis: linear_score={linear_score:.3f}, log_score={log_score:.3f}")
+        print(f"  - Using {'LOGARITHMIC' if use_log_model else 'LINEAR'} model for outlier detection")
+
+        # Fit the appropriate model
+        try:
+            if use_log_model:
+                # Fit: log10(value) = m * pixel + c
+                log_values = np.log10(values)
+                m, c = np.polyfit(pixels, log_values, 1)
+
+                # Predict expected log values
+                expected_log_values = m * pixels + c
+                expected_values = 10 ** expected_log_values
+
+                # Calculate relative errors (better for log scale)
+                errors = np.abs(values - expected_values) / expected_values
+
+            else:
+                # Fit: value = m * pixel + c
+                m, c = np.polyfit(pixels, values, 1)
+
+                # Predict expected values
+                expected_values = m * pixels + c
+
+                # Calculate absolute errors normalized by range
+                value_range = np.max(values) - np.min(values)
+                if value_range > 0:
+                    errors = np.abs(values - expected_values) / value_range
+                else:
+                    errors = np.abs(values - expected_values)
+
+            # Identify outliers using a threshold
+            # Use median absolute deviation for robust outlier detection
+            median_error = np.median(errors)
+            mad = np.median(np.abs(errors - median_error))
+
+            # A tick is an outlier if its error is more than 3 MAD from the median
+            # or if its absolute error is > 0.3 (30% for log, 30% of range for linear)
+            threshold = max(median_error + 3 * mad, 0.3)
+
+            valid_ticks = []
+            for i, tick in enumerate(sorted_ticks):
+                if errors[i] <= threshold:
+                    valid_ticks.append(tick)
+                else:
+                    print(f"    ✗ Removing outlier: {tick['text']} (value={tick['value']:.3f}, "
+                          f"pixel={tick[pixel_key]:.1f}, expected≈{expected_values[i]:.3f}, "
+                          f"error={errors[i]:.3f})")
+
+            removed_count = len(ticks) - len(valid_ticks)
+            if removed_count > 0:
+                print(f"  - Removed {removed_count} spatially inconsistent tick(s) from {axis}-axis")
+
+            # Ensure we keep at least 2 ticks for scaling
+            if len(valid_ticks) < 2 and len(ticks) >= 2:
+                print(f"  - Warning: Too many ticks removed. Keeping ticks with lowest errors.")
+                # Keep the 2 ticks with smallest errors
+                error_indices = np.argsort(errors)[:2]
+                valid_ticks = [sorted_ticks[i] for i in sorted(error_indices)]
+
+            return valid_ticks
+
+        except (np.linalg.LinAlgError, ValueError) as e:
+            print(f"  - Could not fit model for {axis}-axis spatial filtering: {e}")
+            return ticks  # Return original ticks if fitting fails
+    @staticmethod
     def _detect_axis_scale(ticks):
         """
         Heuristically determines if an axis scale is linear or logarithmic
@@ -430,6 +546,16 @@ class ChartExtractor:
                     'bbox': bbox,
                     'rotate': is_y_axis_title
                 })
+
+        # --- NEW: Filter out spatially inconsistent ticks before returning ---
+        x_ticks = [t for t in ocr_data['ticks'] if t.get('axis') == 'x']
+        y_ticks = [t for t in ocr_data['ticks'] if t.get('axis') == 'y']
+
+        filtered_x_ticks = self._filter_spatially_inconsistent_ticks(x_ticks, axis='x')
+        filtered_y_ticks = self._filter_spatially_inconsistent_ticks(y_ticks, axis='y')
+
+        # Rebuild the ticks list with filtered ticks
+        ocr_data['ticks'] = filtered_x_ticks + filtered_y_ticks
         return ocr_data
 
     @staticmethod
