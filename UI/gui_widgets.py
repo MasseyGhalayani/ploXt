@@ -12,6 +12,7 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
+
 class Magnifier(QLabel):
     """A circular magnifying glass widget with crosshairs."""
 
@@ -169,6 +170,7 @@ class SeriesEditorWidget(QGroupBox):
             self.name_edit.setEnabled(True)
             self.duplicate_btn.setEnabled(True)
 
+
 class OcrDebugWidget(QGroupBox):
     """
     A simplified widget card to display OCR debug info for a single text region.
@@ -236,6 +238,7 @@ class OcrDebugWidget(QGroupBox):
         original_label = self.debug_info.get('label', 'OCR Item: ...').split(':')[0]
         self.setTitle(f"{original_label}: {new_text[:15]}...")
 
+
 class InteractivePlotCanvas(FigureCanvas):
     """A matplotlib canvas that supports interactive point editing."""
     points_updated = pyqtSignal(list)
@@ -259,11 +262,19 @@ class InteractivePlotCanvas(FigureCanvas):
         self.fig.canvas.mpl_connect('button_release_event', self.on_release)
 
     def update_plot(self, processed_series, colors, original_series=None, interactive_mode=False,
-                    x_scale='linear', y_scale='linear'):
+                    x_scale='linear', y_scale='linear', image_overlay=None, plot_extent=None, plot_area_bbox=None):
+        """
+        image_overlay: optional BGR numpy array of the original chart image.
+                       When provided (and plot_extent + plot_area_bbox are given),
+                       the cropped plot area is rendered as a semi-transparent background,
+                       matching the behaviour of _recreate_plot_with_overlay in the Results tab.
+        plot_extent:   [x_min, x_max, y_min, y_max] in data coordinates.
+        plot_area_bbox:[x1, y1, x2, y2] pixel coordinates of the plot area in the source image.
+        """
         print("Updating plot in InteractivePlotCanvas")
         self.axes.clear()
 
-        # --- NEW: Set axis scales before plotting ---
+        # --- Set axis scales before plotting ---
         self.axes.set_xscale(x_scale)
         self.axes.set_yscale(y_scale)
 
@@ -272,6 +283,23 @@ class InteractivePlotCanvas(FigureCanvas):
         self.line = None
         self.interactive_scatter = None
         self.dragged_point_index = None
+
+        # --- Image overlay (mirrors _recreate_plot_with_overlay in the Results tab) ---
+        if image_overlay is not None and plot_extent is not None and plot_area_bbox is not None:
+            try:
+                import cv2
+                original_rgb = cv2.cvtColor(image_overlay, cv2.COLOR_BGR2RGB)
+                x1_pixel, y1_pixel, x2_pixel, y2_pixel = plot_area_bbox
+                plot_area_img = original_rgb[int(y1_pixel):int(y2_pixel), int(x1_pixel):int(x2_pixel)]
+                self.axes.imshow(plot_area_img,
+                                 extent=plot_extent,
+                                 aspect='auto',
+                                 alpha=0.3,
+                                 zorder=0,
+                                 interpolation='bilinear',
+                                 origin='upper')
+            except Exception as e:
+                print(f"Warning: Could not render image overlay in post-processing canvas: {e}")
 
         # Plot original data first if available, with a distinct style
         if original_series:
@@ -311,14 +339,16 @@ class InteractivePlotCanvas(FigureCanvas):
             # Handle interactive mode for a single series
             if interactive_mode and len(processed_series) == 1:
                 # The line is the interpolated data from processed_series
-                self.line, = self.axes.plot(x_line, y_line, color=color.name(QColor.HexRgb), label=series['series_name'])
+                self.line, = self.axes.plot(x_line, y_line, color=color.name(QColor.HexRgb),
+                                            label=series['series_name'])
 
                 # The scatter points are the user-editable reference points, which are stored on the canvas itself.
                 # We do NOT overwrite self.interactive_points here.
                 if self.interactive_points:
                     x_scatter = [p['x'] for p in self.interactive_points]
                     y_scatter = [p['y'] for p in self.interactive_points]
-                    self.interactive_scatter = self.axes.scatter(x_scatter, y_scatter, color='red', s=50, zorder=5, label='Interactive Points')
+                    self.interactive_scatter = self.axes.scatter(x_scatter, y_scatter, color='red', s=50, zorder=5,
+                                                                 label='Interactive Points')
             else:
                 self.axes.plot(x_line, y_line, color=color.name(QColor.HexRgb), label=series['series_name'])
 
@@ -327,7 +357,8 @@ class InteractivePlotCanvas(FigureCanvas):
             plot_extent = self.results_data['plot_extent']
             self.axes.set_xlim(plot_extent[0], plot_extent[1])
             self.axes.set_ylim(plot_extent[2], plot_extent[3])
-            print(f"Applying plot extent: X=[{plot_extent[0]}, {plot_extent[1]}], Y=[{plot_extent[2]}, {plot_extent[3]}]")
+            print(
+                f"Applying plot extent: X=[{plot_extent[0]}, {plot_extent[1]}], Y=[{plot_extent[2]}, {plot_extent[3]}]")
 
         # Final plot styling
         self.axes.minorticks_on()
@@ -369,7 +400,8 @@ class InteractivePlotCanvas(FigureCanvas):
 
         # Update the visual representation of the points
         if self.interactive_scatter:
-            self.interactive_scatter.set_offsets(np.c_[[p['x'] for p in self.interactive_points], [p['y'] for p in self.interactive_points]])
+            self.interactive_scatter.set_offsets(
+                np.c_[[p['x'] for p in self.interactive_points], [p['y'] for p in self.interactive_points]])
             self.draw_idle()
 
     def on_release(self, event):
@@ -377,6 +409,7 @@ class InteractivePlotCanvas(FigureCanvas):
         if event.button == 1 and self.dragged_point_index is not None:
             self.dragged_point_index = None
             self.points_updated.emit(self.interactive_points)
+
 
 class CorrectionTab(QWidget):
     def __init__(self, parent=None):
@@ -455,6 +488,7 @@ class CorrectionTab(QWidget):
         layout.addWidget(interpolation_group)
         layout.addWidget(self.apply_corrections_btn)
 
+
 class PostProcessingTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -477,21 +511,23 @@ class PostProcessingTab(QWidget):
         filter_layout.setRowWrapPolicy(QFormLayout.WrapAllRows)
 
         self.outlier_group = QGroupBox("Outlier Removal (Local Regression)")
-        self.outlier_group.setToolTip("Removes data points that deviate significantly from their neighbors. Disabled during manual editing.")
+        self.outlier_group.setToolTip(
+            "Removes data points that deviate significantly from their neighbors. Disabled during manual editing.")
         outlier_form_layout = QFormLayout(self.outlier_group)
-        
+
         self.outlier_enabled_check = QCheckBox("Enable")
 
         self.outlier_method_combo = QComboBox()
         self.outlier_method_combo.addItems(["Local Regression", "RANSAC"])
-        self.outlier_method_combo.setToolTip("Local Regression is good for general noise. RANSAC is better for charts with significant, large outliers.")
+        self.outlier_method_combo.setToolTip(
+            "Local Regression is good for general noise. RANSAC is better for charts with significant, large outliers.")
 
         self.outlier_window_spin = QDoubleSpinBox()
         self.outlier_window_spin.setRange(0.05, 0.5)
         self.outlier_window_spin.setValue(0.15)
         self.outlier_window_spin.setSingleStep(0.01)
         self.outlier_window_spin.setDecimals(2)
-        self.outlier_window_label = QLabel("Window Fraction:") # Label to toggle
+        self.outlier_window_label = QLabel("Window Fraction:")  # Label to toggle
 
         self.outlier_threshold_spin = QDoubleSpinBox()
         self.outlier_threshold_spin.setRange(1.0, 10.0)
@@ -576,6 +612,7 @@ class PostProcessingTab(QWidget):
 
         layout.addWidget(controls_container)
         layout.addWidget(plot_container, 1)
+
 
 class SaveTab(QWidget):
     def __init__(self, parent=None):

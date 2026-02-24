@@ -219,6 +219,7 @@ class MainAppWindow(QMainWindow):
         self.postprocessing_tab.manual_interp_method_combo.currentTextChanged.connect(self._run_postprocessing_preview)
         # View options
         self.postprocessing_tab.show_original_check.toggled.connect(self._run_postprocessing_preview)
+        self.postprocessing_tab.show_original_check.toggled.connect(self._display_current_postproc_state)
 
         self.correction_tab.plot_title_ocr_btn.clicked.connect(
             lambda: self.start_ocr_selection(self.correction_tab.plot_title_edit, "Plot Title", rotate=False))
@@ -1076,6 +1077,28 @@ class MainAppWindow(QMainWindow):
                 ' ', '_'),
         }
 
+    def _get_postproc_image_overlay(self, source_data):
+        """
+        Returns (image_np, plot_extent, plot_area_bbox) for the post-processing
+        canvas image overlay when 'Show Original Data Overlay' is checked.
+        Returns (None, None, None) when the checkbox is unchecked or data is unavailable.
+        """
+        if not self.postprocessing_tab.show_original_check.isChecked():
+            return None, None, None
+
+        image_np = self.image_viewer.get_edited_image_as_numpy()
+        if image_np is None:
+            return None, None, None
+
+        plot_extent = source_data.get('plot_extent') if source_data else None
+        ocr_data = self.current_results.get('ocr_data', {}) if self.current_results else {}
+        plot_area_bbox = ocr_data.get('plot_area_bbox')
+
+        if plot_extent is None or plot_area_bbox is None:
+            return None, None, None
+
+        return image_np, plot_extent, plot_area_bbox
+
     def _run_postprocessing_preview(self):
         """Shows a live preview of post-processing without committing the changes."""
         # Use the latest data available as the source for scales and series
@@ -1144,31 +1167,20 @@ class MainAppWindow(QMainWindow):
                                                   override_points=override_points,
                                                   x_scale=x_scale, y_scale=y_scale, outlier_method=outlier_method)
 
-        # --- NEW: Handle showing original data overlay ---
-        original_data_to_show = None
-        if self.postprocessing_tab.show_original_check.isChecked():
-            # --- FIX: The overlay should always show the data before ANY post-processing. ---
-            # The previous logic (`original_data_to_show = active_series`) was incorrect because
-            # `active_series` is derived from `source_data`, which could be `processed_results`.
-            # This meant the overlay was showing an already-processed state, not the true original.
-            # The correct approach is to always get the overlay data from `self.current_results`.
-            if self.current_results:
-                original_series_all = [s for s in self.current_results['series_data'] if not s.get('is_deleted', False)]
-                if selected_series_name == "All Series":
-                    original_data_to_show = original_series_all
-                else:
-                    original_data_to_show = [s for s in original_series_all if s['series_name'] == selected_series_name]
-
+        # --- Handle showing original image overlay ---
+        image_np, plot_extent, plot_area_bbox = self._get_postproc_image_overlay(source_data)
 
         # --- NEW: Set the results_data reference so the canvas can access plot_extent ---
         self.postprocessing_tab.postproc_canvas.results_data = source_data
 
-        # Update the plot with the temporary result and optional original data
+        # Update the plot with the temporary result and image overlay
         self.postprocessing_tab.postproc_canvas.update_plot(
             processed_preview, self.SERIES_COLORS,
-            original_series=original_data_to_show,
             interactive_mode=interactive_mode,
-            x_scale=x_scale, y_scale=y_scale
+            x_scale=x_scale, y_scale=y_scale,
+            image_overlay=image_np,
+            plot_extent=plot_extent,
+            plot_area_bbox=plot_area_bbox
         )
 
     def _display_current_postproc_state(self):
@@ -1186,7 +1198,6 @@ class MainAppWindow(QMainWindow):
         selected_series_name = self.postprocessing_tab.postproc_series_combo.currentText()
 
         series_to_plot = []
-        original_series_to_show = None
         interactive_mode = False
         self.postprocessing_tab.postproc_canvas.interactive_points = []  # Clear old points before redrawing
 
@@ -1203,22 +1214,19 @@ class MainAppWindow(QMainWindow):
                     if ref_points:
                         self.postprocessing_tab.postproc_canvas.interactive_points = ref_points
 
-        # If the overlay is checked, we need to find the corresponding original data
-        if self.postprocessing_tab.show_original_check.isChecked() and self.current_results:
-            original_series_all = [s for s in self.current_results['series_data'] if not s.get('is_deleted', False)]
-            if selected_series_name == "All Series":
-                original_series_to_show = original_series_all
-            else:
-                original_series_to_show = [s for s in original_series_all if s['series_name'] == selected_series_name]
+        # --- Get image overlay data if checkbox is checked ---
+        image_np, plot_extent, plot_area_bbox = self._get_postproc_image_overlay(source_data)
 
         # --- NEW: Set the results_data reference ---
         self.postprocessing_tab.postproc_canvas.results_data = source_data
 
         self.postprocessing_tab.postproc_canvas.update_plot(
             series_to_plot, self.SERIES_COLORS,
-            original_series=original_series_to_show,
             interactive_mode=interactive_mode,
-            x_scale=x_scale, y_scale=y_scale
+            x_scale=x_scale, y_scale=y_scale,
+            image_overlay=image_np,
+            plot_extent=plot_extent,
+            plot_area_bbox=plot_area_bbox
         )
 
     def _update_postproc_combo_box(self):
