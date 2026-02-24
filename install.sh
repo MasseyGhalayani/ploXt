@@ -10,7 +10,9 @@ uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu
 
 # 3. Install MMDetection in editable mode.
 #    This assumes the 'mmdetection' directory is in the project root.
-uv pip install -e mmdetection --no-build-isolation
+cd mmdetection
+python setup.py develop
+cd ..
 
 
 # 2. Install all other packages from the consolidated requirements file.

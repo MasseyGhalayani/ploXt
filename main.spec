@@ -15,7 +15,7 @@ a = Analysis(
     ],
     hiddenimports=[
         # This explicitly tells PyInstaller to find the missing extension.
-        'mmcv._ext'
+        'mmcv._ext',
     ],
     hookspath=[],
     hooksconfig={},
