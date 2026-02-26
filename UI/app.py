@@ -20,6 +20,7 @@ from .interactive_image_viewer import InteractiveImageViewer
 from .gui_widgets import (SeriesEditorWidget, OcrDebugWidget, InteractivePlotCanvas,
                           CorrectionTab, PostProcessingTab, SaveTab, ResultsTab)
 from .chart_selection_dialog import ChartSelectionDialog
+from .plot_utils import render_image_overlay
 
 import matplotlib.pyplot as plt
 import io
@@ -830,6 +831,7 @@ class MainAppWindow(QMainWindow):
         """
         Calculates the plot extent from tick positions and stores it in the result.
         This extent represents the full plot area in data coordinates.
+        For log-scaled axes, interpolation is done in log-space.
         """
         ocr_data = result.get('ocr_data', {})
         plot_area_bbox = ocr_data.get('plot_area_bbox')
@@ -848,23 +850,39 @@ class MainAppWindow(QMainWindow):
         try:
             x1_pixel, y1_pixel, x2_pixel, y2_pixel = plot_area_bbox
 
+            x_scale = result.get('x_scale_type', 'linear')
+            y_scale = result.get('y_scale_type', 'linear')
+
             # X-axis calibration
             x_pixels = np.array([t['pixel_x'] for t in x_ticks])
             x_values = np.array([t['value'] for t in x_ticks])
-            x_m, x_c = np.polyfit(x_pixels, x_values, 1)
+
+            if x_scale == 'log':
+                # Fit in log-space: pixel -> log10(value)
+                log_x_values = np.log10(x_values)
+                x_m, x_c = np.polyfit(x_pixels, log_x_values, 1)
+                x_min_data = 10 ** (x_m * x1_pixel + x_c)
+                x_max_data = 10 ** (x_m * x2_pixel + x_c)
+            else:
+                x_m, x_c = np.polyfit(x_pixels, x_values, 1)
+                x_min_data = x_m * x1_pixel + x_c
+                x_max_data = x_m * x2_pixel + x_c
 
             # Y-axis calibration
             y_pixels = np.array([t['pixel_y'] for t in y_ticks])
             y_values = np.array([t['value'] for t in y_ticks])
-            y_m, y_c = np.polyfit(y_pixels, y_values, 1)
 
-            # Calculate data coordinates for the FULL plot area bbox
-            x_min_data = x_m * x1_pixel + x_c
-            x_max_data = x_m * x2_pixel + x_c
-
-            # For Y-axis: image Y increases downward, data Y increases upward
-            y_min_data = y_m * y2_pixel + y_c  # bottom of plot (larger pixel Y)
-            y_max_data = y_m * y1_pixel + y_c  # top of plot (smaller pixel Y)
+            if y_scale == 'log':
+                # Fit in log-space: pixel -> log10(value)
+                log_y_values = np.log10(y_values)
+                y_m, y_c = np.polyfit(y_pixels, log_y_values, 1)
+                # For Y-axis: image Y increases downward, data Y increases upward
+                y_min_data = 10 ** (y_m * y2_pixel + y_c)
+                y_max_data = 10 ** (y_m * y1_pixel + y_c)
+            else:
+                y_m, y_c = np.polyfit(y_pixels, y_values, 1)
+                y_min_data = y_m * y2_pixel + y_c
+                y_max_data = y_m * y1_pixel + y_c
 
             plot_extent = [x_min_data, x_max_data, y_min_data, y_max_data]
 
@@ -907,13 +925,9 @@ class MainAppWindow(QMainWindow):
             x1_pixel, y1_pixel, x2_pixel, y2_pixel = plot_area_bbox
             plot_area_img = original_rgb[int(y1_pixel):int(y2_pixel), int(x1_pixel):int(x2_pixel)]
 
-            ax.imshow(plot_area_img,
-                      extent=plot_extent,
-                      aspect='auto',
-                      alpha=0.3,
-                      zorder=0,
-                      interpolation='bilinear',
-                      origin='upper')
+            x_scale = extraction_result.get('x_scale_type', 'linear')
+            y_scale = extraction_result.get('y_scale_type', 'linear')
+            render_image_overlay(ax, plot_area_img, plot_extent, x_scale, y_scale)
 
         # Apply the plot extent to set axis limits (even without overlay)
         if plot_extent:

@@ -11,6 +11,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from .plot_utils import render_image_overlay
 
 
 class Magnifier(QLabel):
@@ -291,13 +292,7 @@ class InteractivePlotCanvas(FigureCanvas):
                 original_rgb = cv2.cvtColor(image_overlay, cv2.COLOR_BGR2RGB)
                 x1_pixel, y1_pixel, x2_pixel, y2_pixel = plot_area_bbox
                 plot_area_img = original_rgb[int(y1_pixel):int(y2_pixel), int(x1_pixel):int(x2_pixel)]
-                self.axes.imshow(plot_area_img,
-                                 extent=plot_extent,
-                                 aspect='auto',
-                                 alpha=0.3,
-                                 zorder=0,
-                                 interpolation='bilinear',
-                                 origin='upper')
+                render_image_overlay(self.axes, plot_area_img, plot_extent, x_scale, y_scale)
             except Exception as e:
                 print(f"Warning: Could not render image overlay in post-processing canvas: {e}")
 
