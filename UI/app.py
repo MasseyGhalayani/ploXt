@@ -1410,7 +1410,9 @@ class MainAppWindow(QMainWindow):
             (s for s in self.current_results['series_data'] if s['series_name'] == selected_series_name), None)
         if not source_series: return
         num_ref_points = self.postprocessing_tab.manual_ref_points_spin.value()
-        initial_ref_points = PostProcessor.resample_series(source_series['data_points'], num_ref_points, 'linear')
+        x_scale = self.current_results.get('x_scale_type', 'linear')
+        y_scale = self.current_results.get('y_scale_type', 'linear')
+        initial_ref_points = PostProcessor.resample_series(source_series['data_points'], num_ref_points, 'linear', x_scale, y_scale)
         self.postprocessing_tab.postproc_canvas.interactive_points = initial_ref_points
         self._run_postprocessing_preview()
 
